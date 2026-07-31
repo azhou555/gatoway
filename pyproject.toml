@@ -1,0 +1,32 @@
+[project]
+name = "gatoway"
+version = "0.1.0"
+description = "Cost-aware LLM gateway (MVP)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "litellm",
+    "asyncpg",
+    "pgvector",
+    "sentence-transformers",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.pytest.ini_options]
+# pytest-asyncio is listed as a dev dep but nothing previously set
+# asyncio_mode, so `@pytest.mark.asyncio` tests across the suite (router,
+# session, circuit breaker, batch_job) failed with "unknown marker" unless
+# every invocation passed --asyncio-mode=auto by hand. auto mode also lets
+# plain `async def test_*` work without the decorator.
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["gatoway*"]

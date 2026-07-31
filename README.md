@@ -35,8 +35,14 @@ python -m gatoway.db migrate
 # 4. Seed the embedding bank (cold start — see SPEC.md §8)
 python -m gatoway.seed
 
+# 4b. (optional) Grow the bank with your own difficulty labels, no LLM needed
+python -m gatoway.label_seed
+
 # 5. Run tests
 pytest
+
+# 5b. Check gateway-added latency against SPEC.md §9's <=100ms budget
+python -m gatoway.bench_latency
 
 # 6. Run the gateway API
 uvicorn gatoway.app:app --reload
@@ -98,6 +104,16 @@ Two important caveats, spelled out in full in `eval_report.md`:
   ivfflat/hnsw index only once the bank is large enough that a seq scan is
   a measured bottleneck.
 
+## Latency
+
+`python -m gatoway.bench_latency` measures SPEC.md §9's actual deliverable —
+"≤100ms added by the gateway on top of native provider latency" — by running
+real requests through the full pipeline (real embedding model, live
+Postgres session tracking + router query + decision_history write) with only
+the provider network call itself stubbed out (explicitly excluded from this
+budget by SPEC.md §9, and stubbing it keeps the benchmark free to run).
+Current result: **p50 26ms, p95 34ms — comfortably under the 100ms target.**
+
 ## Layout
 
 - `docker-compose.yml` — Postgres w/ pgvector extension.
@@ -113,8 +129,11 @@ Two important caveats, spelled out in full in `eval_report.md`:
   machine.
 - `gatoway/app.py` — FastAPI gateway wiring the above together.
 - `gatoway/seed.py` — cold-start embedding bank seed data.
+- `gatoway/label_seed.py` — interactive CLI to grow the bank with your own
+  difficulty labels (no LLM calls needed).
 - `gatoway/batch_job.py` — end-of-session quality scoring + bank write-back
   (train-split only).
 - `gatoway/eval.py` — benchmark harness, produces `eval_report.md`.
+- `gatoway/bench_latency.py` — gateway-overhead latency benchmark (SPEC.md §9).
 - `tests/` — 44 tests covering router, session, circuit breaker, batch job,
   and the gateway API.

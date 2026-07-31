@@ -45,16 +45,15 @@ from gatoway.providers import TIER_MODELS
 SEED_CONFIDENCE = 0.95
 
 
-def _to_pgvector(values: list[float]) -> str:
-    """Encode a python float list as pgvector's text input format
-    ("[0.1,0.2,...]"). Needed because the `pgvector` asyncpg codec isn't
-    registered on the shared pool (gatoway/db.py) -- asyncpg has no built-in
-    encoder for VECTOR columns, so passing a raw list raises
-    asyncpg.exceptions.DataError. Casting the string with `::vector` in SQL
-    sidesteps that without touching the shared pool setup. Local workaround,
-    scoped to this module's own inserts.
+def to_pgvector(values: list[float]) -> list[float]:
+    """No-op passthrough: gatoway.db.get_pool() registers the pgvector
+    asyncpg codec (see db.py's `_init_connection`), so a plain python list
+    binds directly to a VECTOR column/parameter -- no text-format encoding
+    or `::vector` cast needed. Kept as a named function (rather than
+    removing the call sites) so seed.py and label_seed.py both go through
+    one place if that ever changes again.
     """
-    return "[" + ",".join(repr(float(v)) for v in values) + "]"
+    return values
 
 # (prompt, canned "response" text, difficulty)
 CHEAP_EXAMPLES: list[tuple[str, str, float]] = [
@@ -174,7 +173,7 @@ FRONTIER_EXAMPLES: list[tuple[str, str, float]] = [
 ]
 
 
-def _tier_for_difficulty(d: float) -> str:
+def tier_for_difficulty(d: float) -> str:
     if d <= 0.33:
         return "cheap"
     if d <= 0.66:
@@ -188,7 +187,7 @@ def build_seed_rows() -> list[dict]:
     """
     rows = []
     for prompt, response, difficulty in CHEAP_EXAMPLES + MEDIUM_EXAMPLES + FRONTIER_EXAMPLES:
-        tier = _tier_for_difficulty(difficulty)
+        tier = tier_for_difficulty(difficulty)
         rows.append(
             {
                 "prompt": prompt,
@@ -213,15 +212,15 @@ async def seed(pool) -> int:
             INSERT INTO decision_history
                 (routing_id, session_id, model_id, calculated_difficulty,
                  calculated_effectiveness, confidence, input_embedding, response_embedding)
-            VALUES ($1, NULL, $2, $3, $4, $5, $6::vector, $7::vector)
+            VALUES ($1, NULL, $2, $3, $4, $5, $6, $7)
             """,
             uuid.uuid4(),
             model_id,
             row["difficulty"],
             row["effectiveness"],
             SEED_CONFIDENCE,
-            _to_pgvector(input_embedding),
-            _to_pgvector(response_embedding),
+            to_pgvector(input_embedding),
+            to_pgvector(response_embedding),
         )
     return len(rows)
 

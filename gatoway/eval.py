@@ -17,9 +17,9 @@ be up. It talks to gatoway.router / gatoway.providers in-process.
 
 Modes:
     --dry-run   Use canned per-tier responses instead of calling litellm.
-                Auto-selected if neither ANTHROPIC_API_KEY nor
-                OPENAI_API_KEY is set in the environment (with a printed
-                notice -- never silently guessed).
+                Auto-selected if NRP_API_KEY is not set in the
+                environment (with a printed notice -- never silently
+                guessed).
     (default)   Call real providers via gatoway.providers.call_provider().
 
 The router tier decision itself prefers a real DB round-trip
@@ -38,13 +38,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from gatoway.providers import ProviderResponse, TIER_MODELS, call_provider
+from gatoway.providers import MODEL_PARAMS_B, ProviderResponse, TIER_MODELS, call_provider
 from gatoway.router import DEFAULT_THRESHOLD, decide
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "eval_report.md"
@@ -52,61 +50,15 @@ REPORT_PATH = Path(__file__).resolve().parent.parent / "eval_report.md"
 # --- Dry-run cost proxy: parameter count, not invented cents --------------
 #
 # --dry-run makes no real provider call, so there's no real cost_cents to
-# read off a litellm response. Rather than hand-picking fake cents per tier,
-# use each tier's configured model's parameter count (billions) as the cost
-# proxy -- bigger model ~ more compute ~ roughly more expensive, and it's a
-# number we can actually source instead of making up.
-#
-# For local Ollama models this is queried for real from the running Ollama
-# server (ollama exposes exact parameter_size per model). For hosted models
-# whose parameter counts aren't publicly disclosed (Anthropic doesn't
-# publish them for Haiku/Sonnet/Opus), fall back to rough, clearly-labeled
-# order-of-magnitude estimates -- only the relative ordering matters for the
-# demo story, not the exact figure.
-PARAM_COUNT_B_ESTIMATE = {
-    "cheap": 20.0,     # order-of-magnitude guess, not officially disclosed
-    "medium": 200.0,   # order-of-magnitude guess, not officially disclosed
-    "frontier": 2000.0,  # order-of-magnitude guess, not officially disclosed
-}
-
-_param_count_cache: dict[str, float] = {}
-
-
-def _ollama_param_count_b(model_tag: str) -> float | None:
-    """Query a locally running Ollama server for a model's real parameter
-    count (billions). Returns None if Ollama isn't reachable or the model
-    isn't pulled -- caller falls back to the estimate table.
-    """
-    try:
-        req = urllib.request.Request(
-            "http://localhost:11434/api/show",
-            data=json.dumps({"name": model_tag}).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            data = json.load(resp)
-        size = data.get("details", {}).get("parameter_size", "")
-        return float(size.rstrip("BbMm")) if size else None
-    except Exception:
-        return None
+# read off a litellm response -- and NRP publishes no per-token prices for
+# real runs either. Both paths therefore use the same cost proxy: each
+# model's published parameter count (billions), from
+# gatoway.providers.MODEL_PARAMS_B. See that table for the full rationale.
 
 
 def param_count_b(tier: str) -> float:
-    """Cost proxy for `tier`: real parameter count if it's a local Ollama
-    model, else the documented order-of-magnitude estimate.
-    """
-    if tier in _param_count_cache:
-        return _param_count_cache[tier]
-
-    model = TIER_MODELS[tier][0]
-    value = None
-    if model.startswith("ollama/"):
-        value = _ollama_param_count_b(model.removeprefix("ollama/"))
-    if value is None:
-        value = PARAM_COUNT_B_ESTIMATE.get(tier, 0.0)
-
-    _param_count_cache[tier] = value
-    return value
+    """Cost proxy for `tier`: its primary model's parameter count (billions)."""
+    return MODEL_PARAMS_B[TIER_MODELS[tier][0]]
 
 
 @dataclass
@@ -380,21 +332,23 @@ def build_report(
     cost_reduction_pct = _pct(baseline_cost - router_cost, baseline_cost)
     effectiveness_delta_pts = (router_effectiveness - baseline_effectiveness) * 100
 
-    # dry-run has no real currency figure -- report is honest about using a
-    # parameter-count proxy instead (see param_count_b() above) rather than
-    # implying these are real dollars/cents.
-    cost_label = "Compute Proxy (B params)" if dry_run else "Cost (¢)"
+    # Neither mode has a real currency figure: NRP publishes no per-token
+    # prices, so cost is a parameter-count proxy either way (see
+    # param_count_b() above). Be explicit rather than imply real dollars.
+    cost_label = "Compute Proxy (B params)" if dry_run else "Cost Proxy (¢)"
     cost_word = "compute-proxy" if dry_run else "cost"
     fmt = "{:.1f}".format if dry_run else "{:.3f}".format
 
     lines = []
     lines.append("# Eval Report: Router vs Always-Frontier Baseline\n")
-    if dry_run:
-        lines.append(
-            "_--dry-run: no real provider calls. Cost column is a parameter-count "
-            "proxy (real figure for local Ollama tiers, order-of-magnitude estimate "
-            "for hosted tiers whose param counts aren't publicly disclosed), not real spend._\n"
-        )
+    lines.append(
+        ("_--dry-run: no real provider calls; scores come from canned per-tier responses._ "
+         if dry_run else
+         "_Real calls against NRP-hosted models._ ")
+        + "_Cost is a parameter-count proxy, not real spend: NRP has no per-token "
+          "billing, so each model is priced at its published parameter count in "
+          "billions per 1M tokens. Only relative ordering is meaningful._\n"
+    )
     lines.append(
         f"**Headline: {cost_reduction_pct:.0f}% {cost_word} reduction, "
         f"{effectiveness_delta_pts:+.0f} point effectiveness delta vs always "
@@ -460,7 +414,7 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
     dry_run = args.dry_run
-    if not dry_run and not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")):
-        print("[info] No ANTHROPIC_API_KEY or OPENAI_API_KEY set -- auto-falling back to --dry-run.")
+    if not dry_run and not os.environ.get("NRP_API_KEY"):
+        print("[info] No NRP_API_KEY set -- auto-falling back to --dry-run.")
         dry_run = True
     asyncio.run(_main(dry_run))

@@ -112,9 +112,10 @@ New in v0.2:
 
 ### 4.1 Model inventory
 
-NRP's `/v1/models` returns 14 entries and the `/llms` documentation page
-lists 10; they disagree, and several names alias one served model. Resolved
-by *served* model id from a live probe:
+NRP's `/v1/models` and the `/llms` documentation page disagree, and several
+names alias one served model. Resolved by *served* model id, measured over 3
+probe rounds on 2026-09-05 — full table, availability and latency in
+`docs/nrp_characterization.md`:
 
 | NRP name | Served id | Status |
 |---|---|---|
@@ -127,11 +128,19 @@ by *served* model id from a live probe:
 | `deepseek-v4-flash` | `deepseek-ai/DeepSeek-V4-Flash-Vision-Exp` | distinct |
 | `glm-5` | `Inferact/GLM-5.3-NVFP4` | distinct |
 | `kimi` | `moonshotai/Kimi-K2.7-Code` | distinct |
-| `qwen3-4bit`, `gemma-small-e4b` | — | failed to respond |
+| `gemma-small-e4b` | `google/gemma-4-E4B-it` | distinct |
+| `qwen3-4bit` | — | no longer advertised |
 | `qwen3-embedding` | — | not a chat model |
 
-**Nine working distinct chat models.** Building a ladder off the raw model
-list without deduplicating by served id would create phantom rungs.
+**Ten working distinct chat models**, all at 3/3 availability. Building a
+ladder off the raw model list without deduplicating by served id would create
+phantom rungs.
+
+Two corrections from the characterization run. `gemma-small-e4b` failed a
+single probe during the migration but returns 3/3 here — transient, and it is
+now the fastest entry in the table, so it is reinstated. `qwen3-4bit` has left
+NRP's inventory entirely (12 chat models are advertised, not 13); it is
+excluded because it no longer exists, not because it failed.
 
 ### 4.2 Rungs
 
@@ -145,6 +154,13 @@ list without deduplicating by served id would create phantom rungs.
 | 5 | `deepseek-v4-flash` | 304B | 1M |
 | 6 | `glm-5` | 753B | 1M |
 | 7 | `kimi` | 1T | 131K |
+| — | `gemma-small-e4b` | ~4B (unconfirmed) | 262K |
+
+`gemma-small-e4b` is left **unnumbered** deliberately. It belongs below rung
+0 on size, but inserting it would shift every index and §5.3 names "Rung 2
+(`gpt-oss`, 120B)" by number. Its parameter figure is also the exact
+total-versus-effective ambiguity §4.4 flags, and re-costing is design step 4's
+job. Step 4 places it and confirms the figure.
 
 27B and 31B share rung 1: they are not distinguishable as a cost band, so
 `gemma` serves as rung 1's circuit-breaker fallback rather than its own rung.
@@ -175,8 +191,18 @@ counts for most of them. Costing by total params (the published headline
 figure) versus active params could reorder most of the ladder, not one
 entry. Parameter counts alone cannot settle this.
 
-**Mitigation:** the characterization spike (§7, step 2) records *measured
-latency per rung* alongside params. Note this needs its own probe script,
+**Mitigation attempted, and it did not work.** The characterization spike
+recorded measured latency per rung (`docs/nrp_characterization.md`), and the
+measurement does not discriminate: a 250x parameter range compresses into a
+2x latency band, and `gemma` (31B, 511 ms) measures slower than `kimi` (1T,
+505 ms). The probe generates 5 output tokens, so fixed request and scheduling
+overhead dominates and model size barely enters. A probe measuring tokens/sec
+over a longer generation could still produce the signal; more rounds of this
+one cannot. **Until then params are the only evidence behind the cost model,
+and this risk is open, not mitigated.**
+
+The original reasoning, retained because the second signal is still the right
+idea: the spike records *measured latency per rung* alongside params. Note this needs its own probe script,
 **not** `gatoway/bench_latency.py`: that benchmark stubs the provider call
 out to an instant stand-in on purpose, because spec §9 excludes provider
 latency from the gateway's overhead budget. It measures the opposite of what
@@ -405,11 +431,15 @@ planning against assumptions this design exists to avoid.
 
 Mostly done during the NRP migration; what remains:
 
-- Deduplicate by served model id (done — §4.1)
-- Availability across repeated probes: `qwen3-4bit` and `gemma-small-e4b`
-  failed once. Persistent or transient?
-- Measured latency per rung, via a new `gatoway/characterize.py` (§4.4)
-- Context window per rung (§4.2), as a routing constraint
+- [x] Deduplicate by served model id — §4.1, ten distinct models
+- [x] Availability across repeated probes — all 3/3. `gemma-small-e4b`'s
+  failure was transient and it is reinstated; `qwen3-4bit` has left NRP's
+  inventory entirely
+- [x] Measured latency per rung, via `gatoway/characterize.py` — **measured,
+  and it does not discriminate across the param range.** §4.4's mitigation is
+  unproven, not validated; it needs a tokens/sec probe over a longer
+  generation. Design step 4 must not treat the cost model as latency-checked
+- [x] Context window per rung — §4.2, a hard routing constraint
 
 ---
 

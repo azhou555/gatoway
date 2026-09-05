@@ -11,10 +11,13 @@ dependencies = [
     "pgvector",
     "sentence-transformers",
     "python-dotenv",
+    "httpx",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "httpx"]
+# httpx moved to [project].dependencies: gatoway/characterize.py is
+# runtime code and must not depend on a dev extra.
+dev = ["pytest", "pytest-asyncio"]
 
 [tool.pytest.ini_options]
 # pytest-asyncio is listed as a dev dep but nothing previously set

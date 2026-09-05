@@ -1,4 +1,10 @@
-# Cost-Aware LLM Gateway — Architecture Spec (v0.1)
+# Cost-Aware LLM Gateway — Architecture Spec (v0.2)
+
+> v0.2 (2026-09-04) moved every provider tier onto NRP-hosted open-weights
+> models and reconciled this document with the implementation. The wide
+> model ladder that replaces the three-tier scheme is designed in
+> `docs/specs/2026-09-04-wide-ladder-design.md`; this spec describes the
+> system as built.
 
 ## 1. Goal
 
@@ -26,7 +32,7 @@ flowchart TB
     ROUTE -->|embedding query| VDB[(pgvector: embedding bank)]
     ROUTE -->|session state| SESS
     ROUTE -->|tier decision| CB[Circuit Breaker / Fallback]
-    CB -->|selected provider call| PROV[Provider Adapters<br/>Anthropic / OpenAI / OpenRouter / Ollama]
+    CB -->|selected provider call| PROV[Provider Adapter<br/>NRP OpenAI-compatible endpoint]
     PROV --> GW
     GW -->|log decision + outcome| PG[(Postgres: spend ledger,<br/>decision history)]
     GW -->|rate limit counters,<br/>provider health| REDIS[(Redis)]
@@ -45,8 +51,8 @@ flowchart TB
 | Gateway API                | OpenAI-compatible entrypoint, request/response logging                                                                                                    | —                                        |
 | Session Tracker            | Detects session boundaries via task keywords; tracks turn count, elapsed time                                                                             | Redis (live), Postgres (closed sessions) |
 | Router / Classifier        | Embeds incoming request, queries nearest neighbors in pgvector, applies threshold (shifted by session state) to pick a tier                               | pgvector                                 |
-| Circuit Breaker / Fallback | Handles classifier failure (→ Sonnet, single request) and provider failure (→ retry same tier, different provider; 3 consecutive failures → 60s cooldown) | Redis                                    |
-| Provider Adapters          | Thin wrapper per provider (Anthropic, OpenAI, OpenRouter, Ollama for local cheap tier)                                                                    | —                                        |
+| Circuit Breaker / Fallback | Handles classifier failure (→ the fallback rung, single request) and provider failure (→ retry same tier, different provider; 3 consecutive failures → 60s cooldown) | Redis                                    |
+| Provider Adapters          | Thin litellm wrapper over NRP's single OpenAI-compatible endpoint; tier -> model list + parameter-count cost proxy                                       | —                                        |
 | Spend Ledger               | Per-team budget, usage, running average session difficulty                                                                                                | Postgres                                 |
 | Decision History           | Every routing decision + eventual outcome, feeds the embedding bank                                                                                       | Postgres + pgvector                      |
 | Batch Feedback Job         | Runs at session end: scores session quality, writes new embedding + outcome to bank                                                                       | —                                        |
@@ -96,20 +102,25 @@ CREATE TABLE decision_history (
     calculated_difficulty FLOAT,
     calculated_effectiveness FLOAT,     -- filled in after outcome is known
     confidence FLOAT,                   -- similarity score of nearest match; low = fallback used
-    input_embedding VECTOR(1536),
-    response_embedding VECTOR(1536),
-    followup_embedding VECTOR(1536) DEFAULT NULL,
+    input_embedding VECTOR(384),
+    response_embedding VECTOR(384),
+    followup_embedding VECTOR(384) DEFAULT NULL,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX ON decision_history USING ivfflat (input_embedding vector_cosine_ops);
+-- No ANN index. ivfflat's default `lists` is oversized for a bank this
+-- small, so probes=1 misses the true nearest neighbor -- see schema.sql
+-- for the EXPLAIN ANALYZE that showed it. Exact seq scan until a scan is
+-- a measured bottleneck.
 ```
 
 Notes:
 
 - `confidence` is what implements the "no good match" fallback: if the top-k
-  neighbor similarity is below a set floor, route to Sonnet and mark the row
-  low-confidence rather than trusting a weak match.
+  neighbor similarity is below a set floor, route to the fallback rung and
+  mark the row low-confidence rather than trusting a weak match.
+- Embedding model: `all-MiniLM-L6-v2`, 384 dimensions. Chosen so the demo runs
+  without an embedding API key.
 - Only **train-split** sessions get written back into the embedding bank via the
   batch job. Eval/benchmark runs never write back — see §7.
 
@@ -122,9 +133,9 @@ stateDiagram-v2
     [*] --> Routing
     Routing --> ClassifierOK: embedding query succeeds
     Routing --> ClassifierFailed: timeout/error
-    ClassifierFailed --> UseMediumTier: default to Sonnet, single request, no breaker
+    ClassifierFailed --> UseFallbackRung: single request, no breaker
     ClassifierOK --> CallProvider
-    UseMediumTier --> CallProvider
+    UseFallbackRung --> CallProvider
     CallProvider --> Success
     CallProvider --> ProviderFailed
     ProviderFailed --> RetrySameTierDifferentProvider
@@ -196,8 +207,8 @@ stateDiagram-v2
 
 ## 10. Open Questions / Next Steps
 
-- [ ] Pick embedding model (dimension affects `VECTOR(n)` above — placeholder is 1536)
+- [x] Pick embedding model — `all-MiniLM-L6-v2`, 384 dims, local (no API key)
 - [ ] Decide exact keyword-extraction method for task-boundary detection (simple TF-IDF vs small local model)
-- [ ] Define similarity-confidence floor for the "no good match" fallback
+- [x] Define similarity-confidence floor — 0.3 (`router.CONFIDENCE_FLOOR`)
 - [ ] Write 5–10 custom benchmark tasks with pre-registered scoring method per task
 - [ ] Decide on OpenTelemetry span schema (per-request vs per-session spans)

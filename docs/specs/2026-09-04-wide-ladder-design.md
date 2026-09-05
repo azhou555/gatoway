@@ -154,7 +154,7 @@ excluded because it no longer exists, not because it failed.
 | 5 | `deepseek-v4-flash` | 304B | 1M |
 | 6 | `glm-5` | 753B | 1M |
 | 7 | `kimi` | 1T | 131K |
-| — | `gemma-small-e4b` | ~4B (unconfirmed) | 262K |
+| — | `gemma-small-e4b` | ~4B (unconfirmed) | unconfirmed |
 
 `gemma-small-e4b` is left **unnumbered** deliberately. It belongs below rung
 0 on size, but inserting it would shift every index and §5.3 names "Rung 2
@@ -207,9 +207,7 @@ idea: the spike records *measured latency per rung* alongside params. Note this 
 out to an instant stand-in on purpose, because spec §9 excludes provider
 latency from the gateway's overhead budget. It measures the opposite of what
 the ladder needs. Params remain the headline proxy because they
-are published, stable and defensible. Latency is the observed second signal,
-and a rung whose latency badly contradicts its param ordering is the flag
-that the cost model is wrong.
+are published, stable and defensible.
 
 ---
 
@@ -439,7 +437,14 @@ Mostly done during the NRP migration; what remains:
   and it does not discriminate across the param range.** §4.4's mitigation is
   unproven, not validated; it needs a tokens/sec probe over a longer
   generation. Design step 4 must not treat the cost model as latency-checked
-- [x] Context window per rung — §4.2, a hard routing constraint
+- [ ] Context window per rung — **not measured, carried forward.** The plan's
+  prose said the probe would report it; the probe it specified does not, and
+  NRP's `/v1/models` returns only `id`/`created`/`object`/`owned_by` — no
+  `max_model_len` or `context_length`. §4.2 makes context a *hard* routing
+  constraint, so a guessed figure would have the router accept requests a
+  model cannot hold. `gemma-small-e4b`'s cell is `unconfirmed` for that
+  reason. Source it from each model's upstream card before step 4 filters on
+  it
 
 ---
 

@@ -90,3 +90,15 @@ def test_format_report_rows_and_ordering():
     assert report.count("\n| `") == 3  # data rows only; header row starts "| N"
     assert report.index("`fast`") < report.index("`slow`") < report.index("`dead`")
     assert "## Never responded" in report
+
+
+def test_format_report_carries_provenance_footer():
+    """The footer must be generated, not hand-written.
+
+    Its whole job is to warn that a re-run overwrites the file -- a footer
+    added by hand would be destroyed by exactly that re-run.
+    """
+    report = format_report([ModelSummary("a", "v/A", 2, 3, 10.0)])
+    assert "disposable" in report
+    assert "2026-09-04-wide-ladder-design.md" in report
+    assert "3 rounds over\n1 advertised chat models" in report

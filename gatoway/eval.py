@@ -45,7 +45,7 @@ from pathlib import Path
 from gatoway.providers import MODEL_PARAMS_B, ProviderResponse, TIER_MODELS, call_provider
 from gatoway.router import DEFAULT_THRESHOLD, decide
 
-REPORT_PATH = Path(__file__).resolve().parent.parent / "eval_report.md"
+REPORT_PATH = Path(__file__).resolve().parent.parent / "docs" / "eval_report.md"
 
 # --- Dry-run cost proxy: parameter count, not invented cents --------------
 #

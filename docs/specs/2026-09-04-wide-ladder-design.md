@@ -176,8 +176,11 @@ figure) versus active params could reorder most of the ladder, not one
 entry. Parameter counts alone cannot settle this.
 
 **Mitigation:** the characterization spike (§7, step 2) records *measured
-latency per rung* alongside params, using the existing
-`gatoway/bench_latency.py`. Params remain the headline proxy because they
+latency per rung* alongside params. Note this needs its own probe script,
+**not** `gatoway/bench_latency.py`: that benchmark stubs the provider call
+out to an instant stand-in on purpose, because spec §9 excludes provider
+latency from the gateway's overhead budget. It measures the opposite of what
+the ladder needs. Params remain the headline proxy because they
 are published, stable and defensible. Latency is the observed second signal,
 and a rung whose latency badly contradicts its param ordering is the flag
 that the cost model is wrong.
@@ -405,7 +408,7 @@ Mostly done during the NRP migration; what remains:
 - Deduplicate by served model id (done — §4.1)
 - Availability across repeated probes: `qwen3-4bit` and `gemma-small-e4b`
   failed once. Persistent or transient?
-- Measured latency per rung, via `bench_latency.py` (§4.4)
+- Measured latency per rung, via a new `gatoway/characterize.py` (§4.4)
 - Context window per rung (§4.2), as a routing constraint
 
 ---

@@ -15,7 +15,7 @@ MVP is implemented end-to-end and passing 44/44 tests: gateway API, router
 with provider fallback, batch feedback job, seed data, and an eval harness
 that produces the cost/effectiveness report below.
 
-Cut from v0.1 (see `TASKS.md` for the full list and why): OpenTelemetry /
+Cut from v0.1 (see `docs/tasks.md` for the full list and why): OpenTelemetry /
 Prometheus / Grafana, Redis-backed session state, the Ollama local tier
 (config stub only, not wired into the router by default), ML-based keyword
 extraction, and a real LLM-judge (heuristic stub instead).

@@ -1,7 +1,7 @@
 # Design: Wide Model Ladder, Trustworthy Eval, and pgvector Task Decomposition
 
 **Date:** 2026-09-04
-**Status:** Approved, not yet implemented
+**Status:** Implementation in progress — steps 1–3 complete; step 4 is next
 **Supersedes parts of:** the architecture spec v0.1, `SPEC.md` today,
 `docs/spec.md` after step 1 — see §3 below
 
@@ -316,8 +316,8 @@ measurable.
 
 Spec §8 already specifies "exact-match / execution-based pass-fail for tasks
 with a checkable answer (code that must pass tests, math with a numeric
-answer)." `code_fix` and `sql_query` are judge-scored in the implementation.
-Closing that gap:
+answer)." `code_fix` and `sql_query` were previously judge-scored. This
+change closes that gap:
 
 - `code_fix` — run the returned code against assertions.
 - `sql_query` — execute the query against a fixture table and compare
@@ -326,27 +326,42 @@ Closing that gap:
 Both are deterministic, and both remove tasks from the heuristic that
 produced all of the measured variance.
 
+Implemented 2026-09-06: `code_fix` extracts and AST-validates a constrained
+Python loop before running it against three array fixtures; `sql_query` runs
+read-only candidates in an in-memory SQLite database against three salary
+fixtures, including duplicate top salaries.
+
 ### 6.2 Honest reporting for what stays judged
 
 `multistep_planning` and `hard_math_proof` remain judge-scored. They report
 **mean and range across n runs**, never a single figure. The report already
 carries a proxy-cost caveat; it gains a variance caveat.
 
+Implemented 2026-09-06: the eval runs three repeated sessions and reports
+per-task and session-level means and ranges.
+
 ### 6.3 Session-level evaluation
 
 Spec §8 asks for effectiveness/cost "across a full simulated session (not
 just single requests) — this is what demonstrates the min-maxing story."
-The eval is single-request per task today.
+The previous eval treated every task as an independent request.
 
 Session-level evaluation is also the **only** thing that exercises
-`current_threshold` shifting from spec §6, which the current eval never
-touches at all.
+`current_threshold` shifting from spec §6, which the previous single-request
+eval never touched at all.
+
+Implemented 2026-09-06: the eight tasks run as consecutive turns with an
+expected count of three. Turns 4–8 exercise increasing thresholds up to the
+0.9 cap; the report records the threshold and selected tier for every turn.
 
 ### 6.4 Gate
 
-**The four exact/execution-scored tasks must score identically across three
-consecutive runs.** Until that holds, no ladder number is quoted and step 4
-does not start.
+**The six exact/execution-scored tasks must score identically across three
+consecutive runs.** Passed on 2026-09-06 using live NRP calls and DB-backed
+pgvector routing against an isolated 24-row seed bank: all six scored 1.00
+in both paths in every run. The session result was a mean 40.1% proxy-cost
+reduction (36.6–42.7% range) and a -1.0-point mean effectiveness delta
+(-3.1 to 0.0) versus always-frontier.
 
 ---
 
@@ -407,13 +422,13 @@ for top-level requests.
 
 ## 8. Build order
 
-| # | Step | Gate |
-|---|---|---|
-| 1 | Docs consolidation + spec v0.2 | — (no code) |
-| 2 | NRP characterization spike | rung table with latency + availability |
-| 3 | Eval rework | **3 consecutive identical runs on execution-scored tasks** |
-| 4 | Wide ladder + router k-NN | dead rungs pruned on evidence |
-| 5 | Decomposition | **cost-per-passing-outcome beats one frontier call** |
+| # | Step | Status | Gate |
+|---|---|---|---|
+| 1 | Docs consolidation + spec v0.2 | Complete | — (no code) |
+| 2 | NRP characterization spike | Complete | rung table with latency + availability |
+| 3 | Eval rework | Complete | **Passed: 3 identical execution-scored runs** |
+| 4 | Wide ladder + router k-NN | Next | dead rungs pruned on evidence |
+| 5 | Decomposition | Not started | **cost-per-passing-outcome beats one frontier call** |
 
 Steps 3 and 5 are real gates. If step 3 does not stabilize, step 4 does not
 start.

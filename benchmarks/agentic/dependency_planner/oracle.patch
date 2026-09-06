@@ -1,0 +1,65 @@
+--- a/planner/graph.py
++++ b/planner/graph.py
+@@ -1,15 +1,47 @@
+-class UnknownDependencyError(ValueError):
+-    pass
+-
+-
+-class CycleError(ValueError):
+-    pass
+-
+-
+-class DuplicateJobError(ValueError):
+-    pass
+-
+-
+-def build_plan(jobs):
+-    """Return job names in runnable order."""
+-    return [job["name"] for job in jobs]
++class UnknownDependencyError(ValueError):
++    pass
++
++
++class CycleError(ValueError):
++    pass
++
++
++class DuplicateJobError(ValueError):
++    pass
++
++
++def build_plan(jobs):
++    """Return job names in runnable order."""
++    ordered_names = [job["name"] for job in jobs]
++    if len(set(ordered_names)) != len(ordered_names):
++        raise DuplicateJobError("job names must be unique")
++
++    known = set(ordered_names)
++    dependencies = {}
++    for job in jobs:
++        name = job["name"]
++        deps = tuple(job.get("depends_on", ()))
++        unknown = [dependency for dependency in deps if dependency not in known]
++        if unknown:
++            raise UnknownDependencyError(
++                f"job {name!r} depends on unknown job {unknown[0]!r}"
++            )
++        dependencies[name] = set(deps)
++
++    completed = set()
++    plan = []
++    while len(plan) < len(ordered_names):
++        ready = [
++            name
++            for name in ordered_names
++            if name not in completed and dependencies[name] <= completed
++        ]
++        if not ready:
++            blocked = [name for name in ordered_names if name not in completed]
++            raise CycleError(f"dependency cycle among: {', '.join(blocked)}")
++
++        for name in ready:
++            plan.append(name)
++            completed.add(name)
++
++    return plan

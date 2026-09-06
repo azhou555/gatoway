@@ -133,6 +133,40 @@ Important notes:
 
   The current exact sequential scan is the measured path behind this report.
 
+### Agentic coding benchmark
+
+`python -m gatoway.agentic_eval` runs a separate production-oriented coding
+suite. Each task starts from a fresh miniature repository, asks the routed
+model for a unified diff, applies only validated source-file changes, executes
+held-out tests in a network-disabled/resource-limited Docker container, and
+feeds failures back for up to three routed turns. The report captures solve
+rate, first-pass rate, turns, tier paths/switches, and compute/cost proxy.
+
+```bash
+docker pull python:3.13-slim
+
+# Deterministic two-turn smoke test (no model calls)
+python -m gatoway.agentic_eval --dry-run
+
+# Live routed NRP run; repeat for a stability result
+python -m gatoway.agentic_eval --runs 3
+
+# Run one task while iterating on the harness
+python -m gatoway.agentic_eval --task webhook_idempotency
+```
+
+The initial suite covers cache boundary semantics, stable dependency planning,
+and concurrent webhook idempotency. The committed
+`docs/agentic_eval_report.md` records the latest run and labels whether it was
+live or scripted. The current three-run live result solves 3/9 task-runs (the
+TTL task in all three runs) and **fails the production-readiness gate** because
+dependency planning and webhook idempotency solve 0/3 and two repair attempts
+exhausted both medium-tier models. The nine task-runs also accumulated 31.5
+minutes of provider latency, with a 510-second worst task-run. Methodology,
+threat boundary, and the path to
+SWE-bench/Terminal-Bench integration are documented in
+`docs/agentic_benchmarks.md`.
+
 ## Latency
 
 `python -m gatoway.bench_latency` measures SPEC.md §9's actual deliverable —
@@ -163,6 +197,10 @@ Current result: **p50 26ms, p95 34ms — comfortably under the 100ms target.**
 - `gatoway/batch_job.py` — end-of-session quality scoring + bank write-back
   (train-split only).
 - `gatoway/eval.py` — benchmark harness, produces `docs/eval_report.md`.
+- `gatoway/agentic_eval.py` — isolated multi-turn patch/test/repair harness,
+  produces `docs/agentic_eval_report.md`.
+- `benchmarks/agentic/` — starter repositories, held-out tests, task metadata,
+  and deterministic oracle patches.
 - `gatoway/bench_latency.py` — gateway-overhead latency benchmark (SPEC.md §9).
-- `tests/` — 44 tests covering router, session, circuit breaker, batch job,
-  and the gateway API.
+- `tests/` — unit and integration coverage for routing, sessions, provider
+  fallback, feedback jobs, both eval harnesses, and the gateway API.

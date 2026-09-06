@@ -26,6 +26,9 @@ dev = ["pytest", "pytest-asyncio"]
 # every invocation passed --asyncio-mode=auto by hand. auto mode also lets
 # plain `async def test_*` work without the decorator.
 asyncio_mode = "auto"
+# Agentic benchmark grader tests are intentionally held-out fixtures and run
+# only inside their isolated task container, not as part of this repo's suite.
+testpaths = ["tests"]
 
 [build-system]
 requires = ["setuptools>=68"]

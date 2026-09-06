@@ -1,0 +1,4 @@
+id = "dependency_planner"
+difficulty = 0.68
+max_turns = 3
+

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -24,16 +25,18 @@ import time
 import tomllib
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from gatoway.eval import param_count_b
 from gatoway.providers import TIER_MODELS, call_provider
-from gatoway.router import DEFAULT_THRESHOLD, decide
+from gatoway.router import DEFAULT_THRESHOLD, TIERS, decide
 from gatoway.session import compute_threshold
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BENCHMARK_ROOT = PROJECT_ROOT / "benchmarks" / "agentic"
 REPORT_PATH = PROJECT_ROOT / "docs" / "agentic_eval_report.md"
+ARTIFACT_ROOT = PROJECT_ROOT / "artifacts" / "agentic_eval"
 
 AGENTIC_EXPECTED_TURNS = 1
 PROVIDER_TIMEOUT_SECONDS = 120.0
@@ -69,6 +72,8 @@ class AgentResponse:
     output_tokens: int = 0
     latency_seconds: float = 0.0
     provider_error: str | None = None
+    finish_reason: str | None = None
+    provider_failures: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,12 @@ class AgenticAttempt:
     patch_applied: bool
     tests_passed: bool
     observation: str = field(repr=False)
+    router_tier: str = ""
+    minimum_tier: str = ""
+    finish_reason: str | None = None
+    provider_failures: tuple[str, ...] = ()
+    messages_sent: tuple[dict[str, str], ...] = field(default=(), repr=False)
+    response_text: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True)
@@ -104,6 +115,7 @@ class AgenticResult:
     task_id: str
     passed: bool
     attempts: tuple[AgenticAttempt, ...]
+    evaluation_path: str = "router"
 
     @property
     def total_cost_cents(self) -> float:
@@ -132,11 +144,38 @@ class AgenticResult:
         return sum(attempt.latency_seconds for attempt in self.attempts)
 
 
+@dataclass(frozen=True)
+class AgenticEvalRun:
+    router_results: tuple[AgenticResult, ...]
+    baseline_results: tuple[AgenticResult, ...] = ()
+
+
 ModelCaller = Callable[
     [AgenticTask, str, list[dict[str, str]], int], Awaitable[AgentResponse]
 ]
 RouteTurn = Callable[[AgenticTask, str, object, float], Awaitable[str]]
 Grader = Callable[[Path], GradeResult]
+
+
+def tier_at_or_above(
+    routed_tier: str,
+    minimum_tier: str,
+    rung_order: Sequence[str] = TIERS,
+) -> str:
+    """Apply a monotonic rung floor without hard-coding tier transitions."""
+    if routed_tier not in rung_order:
+        raise ValueError(f"routed tier {routed_tier!r} is not in the rung order")
+    if minimum_tier not in rung_order:
+        raise ValueError(f"minimum tier {minimum_tier!r} is not in the rung order")
+    selected_index = max(rung_order.index(routed_tier), rung_order.index(minimum_tier))
+    return rung_order[selected_index]
+
+
+def next_tier(tier: str, rung_order: Sequence[str] = TIERS) -> str:
+    """Return the next configured rung, capped at the highest rung."""
+    if tier not in rung_order:
+        raise ValueError(f"tier {tier!r} is not in the rung order")
+    return rung_order[min(rung_order.index(tier) + 1, len(rung_order) - 1)]
 
 
 def load_tasks(root: Path = BENCHMARK_ROOT) -> list[AgenticTask]:
@@ -219,7 +258,7 @@ def initial_messages(task: AgenticTask, workspace: Path) -> list[dict[str, str]]
 
 
 _FENCED_PATCH_RE = re.compile(
-    r"```(?:diff|patch)?[ \t]*\r?\n(?P<body>.*?)```", re.DOTALL | re.IGNORECASE
+    r"```[^\r\n]*\r?\n(?P<body>.*?)```", re.DOTALL
 )
 _FORBIDDEN_PATCH_MARKERS = (
     "GIT binary patch",
@@ -436,14 +475,21 @@ async def call_agentic_model(
     failures = []
     candidates = TIER_MODELS[tier][:2]
     for candidate_number, model in enumerate(candidates, start=1):
+        generation_options = {
+            "temperature": 0.0,
+            "max_tokens": PROVIDER_MAX_TOKENS,
+        }
+        # NRP's Qwen3 endpoints otherwise spend the entire output allowance
+        # in reasoning_content and frequently terminate at `length` before a
+        # patch is emitted. The vLLM chat-template option requests direct
+        # non-thinking output for this strict patch-generation workload.
+        if "qwen3" in model:
+            generation_options["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
         try:
             response = await asyncio.wait_for(
-                call_provider(
-                    model,
-                    messages,
-                    temperature=0.0,
-                    max_tokens=PROVIDER_MAX_TOKENS,
-                ),
+                call_provider(model, messages, **generation_options),
                 timeout=PROVIDER_TIMEOUT_SECONDS,
             )
             return AgentResponse(
@@ -453,6 +499,8 @@ async def call_agentic_model(
                 response.input_tokens,
                 response.output_tokens,
                 time.perf_counter() - started,
+                finish_reason=response.finish_reason,
+                provider_failures=tuple(failures),
             )
         except Exception as exc:  # provider exceptions are intentionally opaque
             failures.append(f"{model}: {type(exc).__name__}")
@@ -474,6 +522,8 @@ async def call_agentic_model(
         cost_cents=0.0,
         latency_seconds=time.perf_counter() - started,
         provider_error=f"Provider call failed after tier fallback: {detail}",
+        finish_reason="provider_error",
+        provider_failures=tuple(failures),
     )
 
 
@@ -489,7 +539,12 @@ async def scripted_repair_model(
         content = "I need an execution observation before proposing the patch."
     else:
         content = f"```diff\n{task.oracle_patch}```"
-    return AgentResponse(content, f"dry-run/{tier}", param_count_b(tier))
+    return AgentResponse(
+        content,
+        f"dry-run/{tier}",
+        param_count_b(tier),
+        finish_reason="stop",
+    )
 
 
 def _repair_message(observation: str, workspace: Path, task: AgenticTask) -> str:
@@ -507,9 +562,13 @@ async def run_agentic_task(
     grader: Grader,
     model_caller: ModelCaller = call_agentic_model,
     route_turn: RouteTurn = route_agentic_turn,
+    rung_order: Sequence[str] = TIERS,
+    fixed_tier: str | None = None,
+    evaluation_path: str = "router",
 ) -> AgenticResult:
     attempts: list[AgenticAttempt] = []
     latest_observation = ""
+    minimum_tier = fixed_tier or rung_order[0]
 
     with tempfile.TemporaryDirectory(prefix=f"gatoway-{task.task_id}-") as tmp:
         workspace = Path(tmp)
@@ -518,13 +577,31 @@ async def run_agentic_task(
 
         for turn in range(1, task.max_turns + 1):
             threshold = compute_threshold(turn, AGENTIC_EXPECTED_TURNS)
-            tier = await route_turn(task, latest_observation, pool, threshold)
+            router_tier = fixed_tier or await route_turn(
+                task, latest_observation, pool, threshold
+            )
+            tier = (
+                fixed_tier
+                if fixed_tier
+                else tier_at_or_above(router_tier, minimum_tier, rung_order)
+            )
+            messages_sent = tuple(dict(message) for message in messages)
             response = await model_caller(task, tier, messages, turn)
             patch_result = (
                 PatchResult(False, response.provider_error)
                 if response.provider_error
                 else apply_model_patch(workspace, response.content, task.editable_files)
             )
+            if (
+                not patch_result.applied
+                and not response.provider_error
+                and response.finish_reason
+            ):
+                patch_result = PatchResult(
+                    False,
+                    f"{patch_result.observation} Model finish reason: "
+                    f"{response.finish_reason}.",
+                )
 
             tests_passed = False
             if patch_result.applied:
@@ -548,23 +625,77 @@ async def run_agentic_task(
                 patch_applied=patch_result.applied,
                 tests_passed=tests_passed,
                 observation=latest_observation,
+                router_tier=router_tier,
+                minimum_tier=minimum_tier,
+                finish_reason=response.finish_reason,
+                provider_failures=response.provider_failures,
+                messages_sent=messages_sent,
+                response_text=response.content,
             ))
+            routing_detail = (
+                f"router={router_tier} selected={tier}"
+                if router_tier != tier
+                else f"tier={tier}"
+            )
             print(
                 f"  [{task.task_id} turn {turn}/{task.max_turns}] "
-                f"threshold={threshold:.2f} tier={tier} "
+                f"path={evaluation_path} threshold={threshold:.2f} {routing_detail} "
                 f"patch={'yes' if patch_result.applied else 'no'} "
                 f"tests={'PASS' if tests_passed else 'FAIL'}",
                 flush=True,
             )
             if tests_passed:
-                return AgenticResult(task.task_id, True, tuple(attempts))
+                return AgenticResult(
+                    task.task_id, True, tuple(attempts), evaluation_path
+                )
+
+            # Semantic confidence remains useful for the initial selection,
+            # but concrete execution failure is stronger evidence. Raise a
+            # monotonic floor one configured rung for the next repair. This
+            # also moves cross-rung after both models in a tier fail.
+            minimum_tier = next_tier(tier, rung_order)
 
             messages.extend([
                 {"role": "assistant", "content": response.content},
                 {"role": "user", "content": _repair_message(latest_observation, workspace, task)},
             ])
 
-    return AgenticResult(task.task_id, False, tuple(attempts))
+    return AgenticResult(task.task_id, False, tuple(attempts), evaluation_path)
+
+
+def write_trajectory(task: AgenticTask, result: AgenticResult, artifact_dir: Path) -> Path:
+    """Persist a complete per-turn transcript for reproducible diagnosis."""
+    path = artifact_dir / result.evaluation_path / f"{task.task_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "task_id": task.task_id,
+        "evaluation_path": result.evaluation_path,
+        "issue": task.issue,
+        "passed": result.passed,
+        "attempts": [
+            {
+                "turn": attempt.turn,
+                "threshold": attempt.threshold,
+                "router_tier": attempt.router_tier,
+                "minimum_tier": attempt.minimum_tier,
+                "selected_tier": attempt.tier,
+                "model_id": attempt.model_id,
+                "finish_reason": attempt.finish_reason,
+                "provider_failures": list(attempt.provider_failures),
+                "input_tokens": attempt.input_tokens,
+                "output_tokens": attempt.output_tokens,
+                "latency_seconds": attempt.latency_seconds,
+                "patch_applied": attempt.patch_applied,
+                "tests_passed": attempt.tests_passed,
+                "messages_sent": list(attempt.messages_sent),
+                "response_text": attempt.response_text,
+                "observation": attempt.observation,
+            }
+            for attempt in result.attempts
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return path
 
 
 async def run_suite(
@@ -572,11 +703,40 @@ async def run_suite(
     pool,
     grader: Grader,
     model_caller: ModelCaller = call_agentic_model,
-) -> list[AgenticResult]:
-    return [
-        await run_agentic_task(task, pool, grader, model_caller=model_caller)
-        for task in tasks
-    ]
+    rung_order: Sequence[str] = TIERS,
+    include_baseline: bool = True,
+    artifact_dir: Path | None = None,
+) -> AgenticEvalRun:
+    router_results: list[AgenticResult] = []
+    baseline_results: list[AgenticResult] = []
+    for task in tasks:
+        router_result = await run_agentic_task(
+            task,
+            pool,
+            grader,
+            model_caller=model_caller,
+            rung_order=rung_order,
+            evaluation_path="router",
+        )
+        router_results.append(router_result)
+        if artifact_dir:
+            write_trajectory(task, router_result, artifact_dir)
+
+        if include_baseline:
+            baseline_result = await run_agentic_task(
+                task,
+                pool,
+                grader,
+                model_caller=model_caller,
+                rung_order=rung_order,
+                fixed_tier=rung_order[-1],
+                evaluation_path="always_frontier",
+            )
+            baseline_results.append(baseline_result)
+            if artifact_dir:
+                write_trajectory(task, baseline_result, artifact_dir)
+
+    return AgenticEvalRun(tuple(router_results), tuple(baseline_results))
 
 
 def production_readiness_gate(
@@ -614,24 +774,38 @@ def production_readiness_gate(
 
 
 def build_report(
-    runs: Sequence[Sequence[AgenticResult]],
+    runs: Sequence[AgenticEvalRun],
     dry_run: bool,
     db_backed: bool,
     grader_image: str | None = None,
+    artifact_dir: Path | None = None,
 ) -> str:
-    if not runs or not all(runs):
+    if not runs or not all(run.router_results for run in runs):
         raise ValueError("at least one non-empty agentic run is required")
 
-    flat = [result for run in runs for result in run]
-    passed = sum(result.passed for result in flat)
-    first_pass = sum(result.passed and len(result.attempts) == 1 for result in flat)
-    total_attempts = sum(len(result.attempts) for result in flat)
-    total_switches = sum(result.tier_switches for result in flat)
-    total_tokens = sum(result.total_tokens for result in flat)
-    provider_seconds = sum(result.provider_latency_seconds for result in flat)
-    gate_passed, gate_detail = production_readiness_gate(runs)
+    router_runs = [list(run.router_results) for run in runs]
+    baseline_runs = [list(run.baseline_results) for run in runs]
+    flat_router = [result for run in router_runs for result in run]
+    flat_baseline = [result for run in baseline_runs for result in run]
+    gate_passed, gate_detail = production_readiness_gate(router_runs)
     mode = "scripted repair smoke test" if dry_run else "live NRP model calls"
     routing = "DB-backed pgvector" if db_backed else "held-out difficulty fallback"
+
+    def summary(label: str, results: Sequence[AgenticResult]) -> str:
+        passed = sum(result.passed for result in results)
+        first_pass = sum(
+            result.passed and len(result.attempts) == 1 for result in results
+        )
+        attempts = sum(len(result.attempts) for result in results)
+        switches = sum(result.tier_switches for result in results)
+        tokens = sum(result.total_tokens for result in results)
+        seconds = sum(result.provider_latency_seconds for result in results)
+        return (
+            f"**{label}: solved {passed}/{len(results)} ({passed / len(results):.0%}); "
+            f"first-pass {first_pass}/{len(results)} ({first_pass / len(results):.0%}); "
+            f"mean turns {attempts / len(results):.2f}; tier switches {switches}; "
+            f"tokens {tokens:,}; provider latency {seconds:.1f}s.**"
+        )
 
     lines = [
         "# Agentic Coding Eval Report",
@@ -639,21 +813,48 @@ def build_report(
         f"_Mode: {mode}; routing: {routing}; {len(runs)} run(s). Accepted patches "
         "were executed in a network-disabled, resource-limited Docker container._",
         "",
-        f"**Solved: {passed}/{len(flat)} ({passed / len(flat):.0%}); first-pass: "
-        f"{first_pass}/{len(flat)} ({first_pass / len(flat):.0%}); "
-        f"mean turns: {total_attempts / len(flat):.2f}; tier switches: {total_switches}; "
-        f"tokens: {total_tokens:,}; provider latency: {provider_seconds:.1f}s.**",
+        summary("Router", flat_router),
         "",
         f"**Production readiness gate: {'PASS' if gate_passed else 'FAIL'} — "
         f"{gate_detail}.**",
-        "",
-        "| Run | Task | Result | Turns | Tier path | Model path | Tokens | Provider latency | Compute/cost proxy | Failure |",
-        "|---:|---|---|---:|---|---|---:|---:|---:|---|",
     ]
+    if flat_baseline:
+        baseline_passed, baseline_detail = production_readiness_gate(baseline_runs)
+        router_cost = sum(result.total_cost_cents for result in flat_router)
+        baseline_cost = sum(result.total_cost_cents for result in flat_baseline)
+        router_latency = sum(result.provider_latency_seconds for result in flat_router)
+        baseline_latency = sum(
+            result.provider_latency_seconds for result in flat_baseline
+        )
+        cost_reduction = (
+            (baseline_cost - router_cost) / baseline_cost * 100
+            if baseline_cost
+            else 0.0
+        )
+        latency_reduction = (
+            (baseline_latency - router_latency) / baseline_latency * 100
+            if baseline_latency
+            else 0.0
+        )
+        lines.extend([
+            "",
+            summary("Always-frontier baseline", flat_baseline),
+            "",
+            f"**Baseline readiness gate: {'PASS' if baseline_passed else 'FAIL'} — "
+            f"{baseline_detail}.**",
+            "",
+            f"**Router vs baseline: {cost_reduction:.1f}% lower compute/cost proxy "
+            f"and {latency_reduction:.1f}% lower provider latency.**",
+        ])
+    lines.extend([
+        "",
+        "| Run | Path | Task | Result | Turns | Tier path | Model path | Tokens | Provider latency | Compute/cost proxy | Failure |",
+        "|---:|---|---|---|---:|---|---|---:|---:|---:|---|",
+    ])
     if grader_image:
         lines[2] = lines[2][:-1] + f" Grader image: `{grader_image}`._"
     for run_number, run in enumerate(runs, start=1):
-        for result in run:
+        for result in (*run.router_results, *run.baseline_results):
             failure = "—"
             if not result.passed:
                 last = result.attempts[-1]
@@ -665,7 +866,7 @@ def build_report(
                     else "Held-out tests failed"
                 )
             lines.append(
-                f"| {run_number} | {result.task_id} | "
+                f"| {run_number} | {result.evaluation_path} | {result.task_id} | "
                 f"{'PASS' if result.passed else 'FAIL'} | {len(result.attempts)} | "
                 f"{' → '.join(result.tiers)} | {' → '.join(result.models)} | "
                 f"{result.total_tokens:,} | "
@@ -673,6 +874,16 @@ def build_report(
                 f"{failure} |"
             )
     lines.append("")
+    if artifact_dir:
+        try:
+            artifact_label = artifact_dir.relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            artifact_label = str(artifact_dir)
+        lines.extend([
+            f"Full per-turn prompts, responses, finish reasons, provider failures, "
+            f"and grader observations: `{artifact_label}`.",
+            "",
+        ])
     if dry_run:
         lines.append(
             "A dry run deliberately emits no patch on turn one and applies the task's "
@@ -719,7 +930,9 @@ async def _main(args: argparse.Namespace) -> None:
     grader = DockerGrader(args.docker_image, args.test_timeout)
     grader.preflight()
     pool = await _try_get_pool()
-    runs: list[list[AgenticResult]] = []
+    invocation_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    artifact_dir = Path(args.artifacts_dir) / invocation_id
+    runs: list[AgenticEvalRun] = []
     try:
         for run_number in range(1, args.runs + 1):
             print(f"[run {run_number}/{args.runs}]", flush=True)
@@ -728,6 +941,8 @@ async def _main(args: argparse.Namespace) -> None:
                 pool,
                 grader,
                 model_caller=scripted_repair_model if args.dry_run else call_agentic_model,
+                include_baseline=not args.skip_baseline,
+                artifact_dir=artifact_dir / f"run-{run_number:03d}",
             ))
     finally:
         if pool is not None:
@@ -745,10 +960,13 @@ async def _main(args: argparse.Namespace) -> None:
         args.dry_run,
         pool is not None,
         grader_image=image_identity,
+        artifact_dir=artifact_dir,
     )
-    REPORT_PATH.write_text(report + "\n")
+    report_path = Path(args.report_path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report + "\n")
     print(report)
-    print(f"\n[info] Wrote report to {REPORT_PATH}")
+    print(f"\n[info] Wrote report to {report_path}")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -756,6 +974,21 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Use scripted repair/oracle responses.")
     parser.add_argument("--runs", type=int, default=1, help="Number of repeated benchmark runs.")
     parser.add_argument("--task", action="append", help="Run only this task ID (repeatable).")
+    parser.add_argument(
+        "--skip-baseline",
+        action="store_true",
+        help="Skip the fresh-workspace always-frontier control.",
+    )
+    parser.add_argument(
+        "--artifacts-dir",
+        default=str(ARTIFACT_ROOT),
+        help="Directory for raw per-turn trajectory artifacts.",
+    )
+    parser.add_argument(
+        "--report-path",
+        default=str(REPORT_PATH),
+        help="Markdown report output path.",
+    )
     parser.add_argument("--docker-image", default=DEFAULT_DOCKER_IMAGE)
     parser.add_argument("--test-timeout", type=int, default=30)
     return parser.parse_args()

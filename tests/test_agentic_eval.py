@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -6,6 +7,7 @@ import pytest
 
 from gatoway.agentic_eval import (
     AgentResponse,
+    AgenticEvalRun,
     DockerGrader,
     GradeResult,
     apply_model_patch,
@@ -15,7 +17,10 @@ from gatoway.agentic_eval import (
     materialize_task,
     production_readiness_gate,
     run_agentic_task,
+    run_suite,
     scripted_repair_model,
+    tier_at_or_above,
+    next_tier,
     validate_patch,
 )
 from gatoway.providers import ProviderResponse, TIER_MODELS
@@ -74,6 +79,17 @@ def test_patch_validation_rejects_traversal_and_test_edits():
         validate_patch(test_edit, ("cache.py",))
 
 
+def test_python_labeled_fence_extracts_only_the_diff(tmp_path):
+    task = next(task for task in load_tasks() if task.task_id == "ttl_cache")
+    materialize_task(task, tmp_path)
+    response = f"```python\n{task.oracle_patch}```\n"
+
+    patch = apply_model_patch(tmp_path, response, task.editable_files)
+
+    assert patch.applied, patch.observation
+    assert _trusted_local_grader(tmp_path).passed
+
+
 async def test_failed_attempt_chains_observation_and_promotes_tier():
     task = next(task for task in load_tasks() if task.task_id == "ttl_cache")
     calls = []
@@ -86,9 +102,11 @@ async def test_failed_attempt_chains_observation_and_promotes_tier():
         del task, pool
         if threshold == 0.5:
             assert observation == ""
-            return "medium"
-        assert "No unified diff" in observation
-        return "frontier"
+        else:
+            assert "No unified diff" in observation
+        # Reproduce the low-confidence DB fallback: semantic routing remains
+        # medium even after the threshold rises.
+        return "medium"
 
     result = await run_agentic_task(
         task,
@@ -104,6 +122,15 @@ async def test_failed_attempt_chains_observation_and_promotes_tier():
     assert len(calls) == 2
     assert "No unified diff" in calls[1][1][-1]["content"]
     assert "Current repository" in calls[1][1][-1]["content"]
+
+
+def test_rung_floor_and_next_rung_are_order_driven_and_capped():
+    order = ("small", "large", "largest")
+
+    assert tier_at_or_above("small", "large", order) == "large"
+    assert tier_at_or_above("largest", "large", order) == "largest"
+    assert next_tier("small", order) == "large"
+    assert next_tier("largest", order) == "largest"
 
 
 def test_docker_grader_uses_isolation_flags(monkeypatch, tmp_path):
@@ -159,11 +186,13 @@ async def test_report_labels_dry_run_as_non_quality_result():
         model_caller=scripted_repair_model,
         route_turn=medium_router,
     )
-    report = build_report([[result]], dry_run=True, db_backed=False)
+    report = build_report(
+        [AgenticEvalRun((result,))], dry_run=True, db_backed=False
+    )
 
     assert "scripted repair smoke test" in report
     assert "not a model-quality result" in report
-    assert "medium → medium" in report
+    assert "medium → frontier" in report
     assert "Production readiness gate: FAIL" in report
 
 
@@ -195,12 +224,17 @@ async def test_provider_failure_uses_configured_tier_fallback(monkeypatch):
     task = next(task for task in load_tasks() if task.task_id == "ttl_cache")
     called = []
 
+    options = []
+
     async def fake_provider(model, messages, **kwargs):
-        del messages, kwargs
+        del messages
         called.append(model)
+        options.append(kwargs)
         if len(called) == 1:
             raise RuntimeError("primary unavailable")
-        return ProviderResponse("patch", model, 10, 5, 0.01, raw=None)
+        return ProviderResponse(
+            "patch", model, 10, 5, 0.01, raw=None, finish_reason="length"
+        )
 
     monkeypatch.setattr("gatoway.agentic_eval.call_provider", fake_provider)
     response = await call_agentic_model(task, "medium", [], 1)
@@ -209,6 +243,14 @@ async def test_provider_failure_uses_configured_tier_fallback(monkeypatch):
     assert response.content == "patch"
     assert response.model_id == TIER_MODELS["medium"][1]
     assert response.provider_error is None
+    assert response.finish_reason == "length"
+    assert response.provider_failures == (
+        f"{TIER_MODELS['medium'][0]}: RuntimeError",
+    )
+    assert options[0]["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+    assert "extra_body" not in options[1]
 
 
 async def test_exhausted_tier_fallback_becomes_observable_attempt(monkeypatch):
@@ -234,4 +276,45 @@ async def test_exhausted_tier_fallback_becomes_observable_attempt(monkeypatch):
     assert not result.passed
     assert len(result.attempts) == task.max_turns
     assert all("Provider call failed" in attempt.observation for attempt in result.attempts)
-    assert all(attempt.model_id == "provider-error/medium" for attempt in result.attempts)
+    assert result.tiers == ("medium", "frontier", "frontier")
+    assert tuple(attempt.router_tier for attempt in result.attempts) == (
+        "medium", "medium", "medium"
+    )
+    assert tuple(attempt.model_id for attempt in result.attempts) == (
+        "provider-error/medium",
+        "provider-error/frontier",
+        "provider-error/frontier",
+    )
+
+
+async def test_suite_adds_fresh_always_frontier_baseline_and_trajectories(tmp_path):
+    task = next(task for task in load_tasks() if task.task_id == "ttl_cache")
+
+    run = await run_suite(
+        [task],
+        pool=None,
+        grader=_trusted_local_grader,
+        model_caller=scripted_repair_model,
+        include_baseline=True,
+        artifact_dir=tmp_path,
+    )
+
+    assert run.router_results[0].passed
+    assert run.router_results[0].tiers == ("medium", "frontier")
+    assert run.baseline_results[0].passed
+    assert run.baseline_results[0].tiers == ("frontier", "frontier")
+
+    trajectory_path = tmp_path / "router" / "ttl_cache.json"
+    trajectory = json.loads(trajectory_path.read_text())
+    assert trajectory["evaluation_path"] == "router"
+    assert trajectory["attempts"][0]["response_text"].startswith("I need")
+    assert trajectory["attempts"][0]["finish_reason"] == "stop"
+    assert trajectory["attempts"][0]["messages_sent"][0]["role"] == "system"
+    assert trajectory["attempts"][0]["selected_tier"] == "medium"
+    assert trajectory["attempts"][1]["router_tier"] == "frontier"
+    assert trajectory["attempts"][1]["minimum_tier"] == "frontier"
+    assert (tmp_path / "always_frontier" / "ttl_cache.json").exists()
+
+    report = build_report([run], dry_run=True, db_backed=False)
+    assert "Always-frontier baseline" in report
+    assert "Router vs baseline" in report

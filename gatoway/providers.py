@@ -70,6 +70,7 @@ class ProviderResponse:
     output_tokens: int
     cost_cents: float
     raw: Any = field(repr=False)
+    finish_reason: str | None = None
 
 
 def cost_cents(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -111,4 +112,5 @@ async def call_provider(model: str, messages: list[dict], **kwargs) -> ProviderR
         output_tokens=usage.completion_tokens,
         cost_cents=cost_cents(model, usage.prompt_tokens, usage.completion_tokens),
         raw=response,
+        finish_reason=getattr(response.choices[0], "finish_reason", None),
     )

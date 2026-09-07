@@ -158,14 +158,12 @@ python -m gatoway.agentic_eval --task webhook_idempotency
 The initial suite covers cache boundary semantics, stable dependency planning,
 and concurrent webhook idempotency. The committed
 `docs/agentic_eval_report.md` records the latest run and labels whether it was
-live or scripted. The current three-run live result solves 3/9 task-runs (the
-TTL task in all three runs) and **fails the production-readiness gate** because
-dependency planning and webhook idempotency solve 0/3 and two repair attempts
-exhausted both medium-tier models. The nine task-runs also accumulated 31.5
-minutes of provider latency, with a 510-second worst task-run. Methodology,
-threat boundary, and the path to
-SWE-bench/Terminal-Bench integration are documented in
-`docs/agentic_benchmarks.md`.
+live or scripted. In the current three-run live comparison, the router and
+always-frontier control both solved 9/9 task-runs and passed the readiness gate.
+The router used medium on all nine successful first attempts, reducing the
+compute/cost proxy by 87.2% and provider latency by 52.4% versus the frontier
+control. Methodology, threat boundary, and the path to SWE-bench/Terminal-Bench
+integration are documented in `docs/agentic_benchmarks.md`.
 
 ## Latency
 

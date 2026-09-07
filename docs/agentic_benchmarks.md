@@ -43,11 +43,29 @@ For every task and every run:
 6. On failure, append the model response, execution observation, and current
    source snapshot to the conversation. Route and attempt another repair, up
    to the task's turn limit.
+7. Run the same task from a fresh workspace with every turn pinned to the
+   highest configured rung. This always-frontier control distinguishes routing
+   failures from model or output-protocol failures.
 
 The session threshold uses an expected length of one turn. A repair therefore
 raises the threshold from `0.50` to `0.90`, allowing the current tier router to
 promote a borderline task after an unsuccessful attempt. The report records
 the exact tier path so this behavior is observable rather than inferred.
+
+Execution failure also raises a separate monotonic minimum rung. The selected
+rung is the higher of the semantic routing result and this floor. An invalid
+diff, failed test suite, or exhaustion of both models in a rung advances the
+floor by one position in the configured rung order; it never hard-codes a
+`medium → frontier` branch and caps safely at the highest rung. Consequently,
+the low-confidence medium fallback remains cost-conscious on the first turn
+but cannot trap a failing agent there.
+
+Qwen3 generation uses its non-thinking chat-template mode for this strict
+patch-output workload. A controlled live probe showed the default mode
+exhausting the 2,400-token allowance in reasoning before emitting a patch,
+whereas non-thinking mode returned a patch with a normal `stop` reason. Fenced
+diff extraction accepts arbitrary language labels such as `python`, while the
+same path, file-operation, and editable-source validation still applies.
 
 ## Initial task set
 
@@ -75,10 +93,17 @@ provider latency, and aggregate compute/cost proxy. The production-readiness
 gate requires three runs, every task passing at least two of three times, and
 no attempt exhausting both models configured for its tier.
 
+Raw JSON trajectories are written under the ignored `artifacts/agentic_eval/`
+directory. They include every prompt, response, provider finish reason,
+same-rung provider failure, selected/semantic/minimum rung, patch outcome, and
+grader observation. They are intentionally not committed because live model
+transcripts can be large or contain repository content.
+
 ```bash
 docker pull python:3.13-slim
 python -m gatoway.agentic_eval --dry-run
 python -m gatoway.agentic_eval --runs 3
+python -m gatoway.agentic_eval --skip-baseline  # faster harness iteration only
 ```
 
 The dry run deliberately fails patch parsing on turn one and uses the oracle

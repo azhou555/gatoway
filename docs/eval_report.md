@@ -1,5 +1,9 @@
 # Eval Report: Router vs Always-Frontier Baseline
 
+> Historical result from the three-tier router. The eight-rung ladder was
+> configured afterward and requires a fresh live run before these numbers can
+> be used to compare or prune its rungs.
+
 _Real calls against NRP-hosted models._ _Cost is a parameter-count proxy, not real spend: NRP has no per-token billing, so each model is priced at its published parameter count in billions per 1M tokens. Only relative ordering is meaningful._
 
 _Scoring: exact match for factual tasks; constrained Python/SQLite fixture execution for code and SQL; heuristic judging only for the two open-ended tasks._

@@ -95,8 +95,8 @@ async def test_eval_is_a_session_and_threshold_shift_changes_later_routing():
     assert router_results[-1].current_threshold > DEFAULT_THRESHOLD
     # Both tasks route lower at the default threshold. Their later turn
     # positions promote them, proving the session signal reaches the router.
-    assert by_task["quadratic_roots"].tier == "medium"
-    assert by_task["sql_query"].tier == "frontier"
+    assert by_task["quadratic_roots"].tier == "gpt-oss"
+    assert by_task["sql_query"].tier == "deepseek-v4-flash"
 
 
 @pytest.mark.asyncio
@@ -145,5 +145,5 @@ async def test_live_provider_call_has_a_bounded_timeout(monkeypatch):
     monkeypatch.setattr(eval_module, "EVAL_PROVIDER_TIMEOUT_SECONDS", 0.001)
 
     with pytest.raises(TimeoutError):
-        await eval_module._real_provider("cheap", BENCHMARK_TASKS[0])
+        await eval_module._real_provider("gemma-small", BENCHMARK_TASKS[0])
     assert attempts == 2

@@ -8,7 +8,7 @@ machine as seen from the HTTP layer:
   1. Happy path: classify() succeeds, breaker.call() succeeds -> 200 with
      the OpenAI-compatible shape + gatoway metadata.
   2. Classifier failure: classify() raises -> call_with_classifier_fallback()
-     used instead (medium tier, no breaker), reported as classifier_failed.
+     used instead (`gpt-oss` rung, no breaker), reported as classifier_failed.
   3. Circuit breaker exhausted: classify() succeeds but breaker.call() raises
      TierInCooldownError -> clean 503 in OpenAI error shape, not a 500.
 """
@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 import gatoway.app as app_module
 from gatoway.circuit_breaker import TierInCooldownError
 from gatoway.providers import ProviderResponse
-from gatoway.router import RoutingDecision
+from gatoway.router import RequestTooLargeError, RoutingDecision
 
 
 class FakePool:
@@ -65,7 +65,7 @@ def client():
     return TestClient(app_module.app)
 
 
-def make_provider_response(model_id="anthropic/claude-sonnet-4-5"):
+def make_provider_response(model_id="openai/gpt-oss"):
     return ProviderResponse(
         content="4",
         model_id=model_id,
@@ -78,7 +78,7 @@ def make_provider_response(model_id="anthropic/claude-sonnet-4-5"):
 
 def test_happy_path_returns_200_with_gatoway_metadata(monkeypatch):
     decision = RoutingDecision(
-        tier="cheap",
+        tier="gemma-small",
         confidence=0.9,
         low_confidence=False,
         calculated_difficulty=0.1,
@@ -90,8 +90,8 @@ def test_happy_path_returns_200_with_gatoway_metadata(monkeypatch):
         return decision
 
     async def fake_breaker_call(self, tier, messages, **kwargs):
-        assert tier == "cheap"
-        return make_provider_response("anthropic/claude-haiku-4-5-20251001")
+        assert tier == "gemma-small"
+        return make_provider_response("openai/gemma-small")
 
     monkeypatch.setattr(app_module, "classify", fake_classify)
     monkeypatch.setattr(app_module.CircuitBreaker, "call", fake_breaker_call)
@@ -108,19 +108,19 @@ def test_happy_path_returns_200_with_gatoway_metadata(monkeypatch):
     body = resp.json()
     assert body["choices"][0]["message"]["content"] == "4"
     assert body["usage"]["total_tokens"] == 12
-    assert body["gatoway"]["tier"] == "cheap"
-    assert body["gatoway"]["model_id"] == "anthropic/claude-haiku-4-5-20251001"
+    assert body["gatoway"]["tier"] == "gemma-small"
+    assert body["gatoway"]["model_id"] == "openai/gemma-small"
     assert body["gatoway"]["classifier_failed"] is False
     assert body["gatoway"]["confidence"] == 0.9
     assert "session_id" in body["gatoway"]
 
 
-def test_classifier_failure_falls_back_to_medium_tier(monkeypatch, fake_pool):
+def test_classifier_failure_falls_back_to_gpt_oss_rung(monkeypatch, fake_pool):
     async def fake_classify(text, pool, current_threshold):
         raise RuntimeError("embedding service unreachable")
 
     async def fake_fallback(messages, **kwargs):
-        return make_provider_response("anthropic/claude-sonnet-4-5")
+        return make_provider_response("openai/gpt-oss")
 
     breaker_call_invoked = False
 
@@ -144,14 +144,14 @@ def test_classifier_failure_falls_back_to_medium_tier(monkeypatch, fake_pool):
     body = resp.json()
     assert breaker_call_invoked is False
     assert body["gatoway"]["classifier_failed"] is True
-    assert body["gatoway"]["tier"] == "medium"
-    assert body["gatoway"]["model_id"] == "anthropic/claude-sonnet-4-5"
+    assert body["gatoway"]["tier"] == "gpt-oss"
+    assert body["gatoway"]["model_id"] == "openai/gpt-oss"
     assert body["gatoway"]["confidence"] is None
 
 
 def test_circuit_breaker_exhausted_returns_clean_503(monkeypatch, fake_pool):
     decision = RoutingDecision(
-        tier="frontier",
+        tier="kimi",
         confidence=0.8,
         low_confidence=False,
         calculated_difficulty=0.9,
@@ -178,6 +178,46 @@ def test_circuit_breaker_exhausted_returns_clean_503(monkeypatch, fake_pool):
     assert resp.status_code == 503
     body = resp.json()
     assert "error" in body
-    assert "frontier" in body["error"]["message"]
+    assert "kimi" in body["error"]["message"]
     # No decision_history row should have been written for a failed call.
     assert not any("INSERT INTO decision_history" in q for q, _ in fake_pool.executed)
+
+
+def test_oversized_request_is_not_sent_to_classifier_fallback(monkeypatch, fake_pool):
+    async def too_large(text, pool, current_threshold):
+        raise RequestTooLargeError("request exceeds every configured context window")
+
+    async def forbidden_fallback(messages, **kwargs):
+        raise AssertionError("oversized requests must not be sent to a provider")
+
+    monkeypatch.setattr(app_module, "classify", too_large)
+    monkeypatch.setattr(app_module, "call_with_classifier_fallback", forbidden_fallback)
+
+    response = TestClient(app_module.app).post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "too large"}]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["type"] == "context_length_exceeded"
+
+
+def test_classifier_failure_uses_context_capable_fallback_rung(monkeypatch):
+    async def failed_classifier(text, pool, current_threshold):
+        raise RuntimeError("database unavailable")
+
+    async def fake_fallback(messages, rung, **kwargs):
+        assert rung == "qwen3-small"
+        return make_provider_response("openai/qwen3-small")
+
+    monkeypatch.setattr(app_module, "classify", failed_classifier)
+    monkeypatch.setattr(app_module, "estimate_tokens", lambda text: 300_000)
+    monkeypatch.setattr(app_module, "call_with_classifier_fallback", fake_fallback)
+
+    response = TestClient(app_module.app).post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "large"}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["gatoway"]["tier"] == "qwen3-small"

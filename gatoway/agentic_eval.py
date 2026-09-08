@@ -30,7 +30,7 @@ from pathlib import Path, PurePosixPath
 
 from gatoway.eval import param_count_b
 from gatoway.providers import TIER_MODELS, call_provider
-from gatoway.router import DEFAULT_THRESHOLD, TIERS, decide
+from gatoway.router import DEFAULT_THRESHOLD, TIERS, approximate_rung
 from gatoway.session import compute_threshold
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -455,13 +455,7 @@ async def route_agentic_turn(
                 flush=True,
             )
 
-    return decide(
-        similarity=0.9,
-        difficulty=task.difficulty,
-        matched_routing_id=None,
-        input_embedding=[],
-        current_threshold=current_threshold,
-    ).tier
+    return approximate_rung(task.difficulty, current_threshold)
 
 
 async def call_agentic_model(
@@ -838,7 +832,7 @@ def build_report(
         )
         lines.extend([
             "",
-            summary("Always-frontier baseline", flat_baseline),
+            summary("Always-highest-rung baseline", flat_baseline),
             "",
             f"**Baseline readiness gate: {'PASS' if baseline_passed else 'FAIL'} — "
             f"{baseline_detail}.**",
@@ -977,7 +971,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-baseline",
         action="store_true",
-        help="Skip the fresh-workspace always-frontier control.",
+        help="Skip the fresh-workspace always-highest-rung control.",
     )
     parser.add_argument(
         "--artifacts-dir",

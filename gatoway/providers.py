@@ -1,11 +1,11 @@
-"""Thin wrapper around litellm.completion() for the gateway's tier system.
+"""Thin wrapper around litellm.completion() for the gateway's model ladder.
 
 Per SPEC.md §3 ("Provider Adapters") and the non-goal note in §1, we reuse
 LiteLLM's provider/response handling rather than rebuilding it. This module
-only adds: a tier -> model-list config, a small response dataclass, and a
+only adds: an ordered rung config, a small response dataclass, and a
 single async call function.
 
-All tiers are served by NRP (https://nrp.ai/llmtoken/), one OpenAI-compatible
+All rungs are served by NRP (https://nrp.ai/llmtoken/), one OpenAI-compatible
 endpoint fronting every NRP-hosted open-weights model, authenticated with
 NRP_API_KEY.
 """
@@ -33,32 +33,80 @@ NRP_API_BASE = "https://ellm.nrp-nautilus.io/v1"
 # providers charge 3-5x for output; add that weighting only if NRP ever
 # publishes real prices.
 #
-# NOTE: qwen3 is a 180B-total / 6B-active MoE. We use the headline *total*
-# param count, which is what makes it the frontier tier -- costing it by
-# active params (6B) would make it cheaper than every other tier and invert
-# the whole ladder.
+# NOTE: several entries are MoE models. We use headline *total* parameters
+# consistently because NRP does not publish active-parameter counts for the
+# full inventory. This is an explicit proxy, not a claim about inference cost.
 MODEL_PARAMS_B: dict[str, float] = {
     "openai/gemma-small": 12.0,
     "openai/qwen3-small": 27.0,
     "openai/gemma": 31.0,
     "openai/gpt-oss": 120.0,
     "openai/qwen3": 180.0,
+    "openai/minimax-m2": 230.0,
+    "openai/deepseek-v4-flash": 304.0,
+    "openai/glm-5": 753.0,
+    "openai/kimi": 1000.0,
 }
 
-# Tier -> ordered list of litellm model strings, ordered by parameter count.
-# First entry is the primary model for that tier; the second is the fallback
-# tried by the circuit breaker on failure (SPEC.md §5: "retry same tier,
-# different provider" -- here, a different model of comparable size on a
-# different NRP backend).
+# Context capacities are model-specific hard routing constraints. Values are
+# from NRP's managed-model matrix; its `/v1/models` endpoint does not expose
+# this metadata. Keep fallbacks here too because a
+# fallback may have a different window than its rung's primary.
+MODEL_CONTEXT_TOKENS: dict[str, int] = {
+    "openai/gemma-small": 262_144,
+    "openai/qwen3-small": 1_000_000,
+    "openai/gemma": 262_144,
+    "openai/gpt-oss": 131_072,
+    "openai/qwen3": 1_000_000,
+    "openai/minimax-m2": 204_800,
+    "openai/deepseek-v4-flash": 1_048_576,
+    "openai/glm-5": 1_048_576,
+    "openai/kimi": 131_072,
+}
+
+
+@dataclass(frozen=True)
+class ModelRung:
+    """One selectable ladder position and its provider fallback order."""
+
+    name: str
+    models: tuple[str, ...]
+
+    @property
+    def primary(self) -> str:
+        return self.models[0]
+
+    @property
+    def params_b(self) -> float:
+        return MODEL_PARAMS_B[self.primary]
+
+    @property
+    def context_tokens(self) -> int:
+        return MODEL_CONTEXT_TOKENS[self.primary]
+
+
+# Ascending by the only consistently available cost signal: total params.
+# Neighboring rungs cross-fallback where NRP has no same-size duplicate.
+# gemma-small-e4b stays out because NRP's active-model matrix no longer lists
+# that compatibility endpoint.
+MODEL_LADDER: tuple[ModelRung, ...] = (
+    ModelRung("gemma-small", ("openai/gemma-small", "openai/qwen3-small")),
+    ModelRung("qwen3-small", ("openai/qwen3-small", "openai/gemma")),
+    ModelRung("gpt-oss", ("openai/gpt-oss", "openai/qwen3")),
+    ModelRung("qwen3", ("openai/qwen3", "openai/gpt-oss")),
+    ModelRung("minimax-m2", ("openai/minimax-m2", "openai/deepseek-v4-flash")),
+    ModelRung("deepseek-v4-flash", ("openai/deepseek-v4-flash", "openai/minimax-m2")),
+    ModelRung("glm-5", ("openai/glm-5", "openai/kimi")),
+    ModelRung("kimi", ("openai/kimi", "openai/glm-5")),
+)
+
+RUNG_NAMES: tuple[str, ...] = tuple(rung.name for rung in MODEL_LADDER)
+RUNG_BY_NAME: dict[str, ModelRung] = {rung.name: rung for rung in MODEL_LADDER}
+
+# Compatibility name retained for callers while their public `tier` fields
+# transition to rung names. Unlike the old mapping, every key is selectable.
 TIER_MODELS: dict[str, list[str]] = {
-    "cheap": ["openai/gemma-small", "openai/qwen3-small"],
-    "medium": ["openai/qwen3-small", "openai/gemma"],
-    "frontier": ["openai/qwen3", "openai/gpt-oss"],
-    # Unwired stub per SPEC.md non-goals / TASKS.md ("Ollama local tier --
-    # stub adapter only, not wired into router by default"). Not referenced
-    # by TIER_MODELS lookups elsewhere; kept separate so it can't
-    # accidentally get called by the router/circuit breaker.
-    "ollama": ["ollama/llama3"],
+    rung.name: list(rung.models) for rung in MODEL_LADDER
 }
 
 
@@ -82,7 +130,7 @@ async def call_provider(model: str, messages: list[dict], **kwargs) -> ProviderR
     """Call a specific litellm model string and return a normalized response.
 
     Note: takes a concrete model string (e.g. "openai/qwen3-small"), not a
-    tier name -- tier -> model resolution and fallback-on-failure is the
+    rung name -- rung -> model resolution and fallback-on-failure is the
     circuit breaker's job (gatoway/circuit_breaker.py).
     """
     response = await litellm.acompletion(

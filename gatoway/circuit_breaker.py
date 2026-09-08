@@ -7,7 +7,7 @@ Two independent paths, per the spec's state diagram:
   -> (Success | ProviderFailed). 3 consecutive failures for a tier ->
   MarkUnhealthy -> Cooldown60s -> Routing (retry allowed again).
 - Classifier failure: bypasses the breaker entirely, single request to the
-  medium tier ("UseMediumTier: default to Sonnet, single request, no breaker").
+  configured cold-start rung (`gpt-oss`).
 
 State is in-process (dict + lock) per TASKS.md: single gateway instance, no
 Redis for MVP.
@@ -19,7 +19,13 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 
-from gatoway.providers import TIER_MODELS, ProviderResponse, call_provider
+from gatoway.providers import (
+    MODEL_CONTEXT_TOKENS,
+    TIER_MODELS,
+    ProviderResponse,
+    call_provider,
+)
+from gatoway.router import FALLBACK_RUNG, RequestTooLargeError, estimate_tokens
 
 FAILURE_THRESHOLD = 3
 COOLDOWN_SECONDS = 60.0
@@ -103,7 +109,21 @@ class CircuitBreaker:
         """
         await self._check_cooldown(tier)
 
-        candidates = self._tier_models[tier]
+        requested_output_tokens = int(kwargs.get("max_tokens", 0) or 0)
+        input_tokens = estimate_tokens(
+            "\n".join(str(message.get("content", "")) for message in messages)
+        )
+        required_context = input_tokens + requested_output_tokens
+        candidates = [
+            model
+            for model in self._tier_models[tier]
+            if MODEL_CONTEXT_TOKENS.get(model, required_context) >= required_context
+        ]
+        if not candidates:
+            raise RequestTooLargeError(
+                f"estimated input plus requested output is {required_context:,} tokens; "
+                f"no provider in rung {tier!r} can hold it"
+            )
         last_exc: Exception | None = None
         for model in candidates[:2]:  # primary + one fallback provider
             try:
@@ -121,11 +141,11 @@ class CircuitBreaker:
 
 
 async def call_with_classifier_fallback(
-    messages: list[dict], **kwargs
+    messages: list[dict], rung: str = FALLBACK_RUNG, **kwargs
 ) -> ProviderResponse:
     """Classifier/router failed (e.g. embedding lookup errored) -> default
-    straight to the medium tier for a single request, bypassing the circuit
+    straight to the fallback rung for a single request, bypassing the circuit
     breaker entirely (SPEC.md §5: "no breaker").
     """
-    model = TIER_MODELS["medium"][0]
+    model = TIER_MODELS[rung][0]
     return await call_provider(model, messages, **kwargs)

@@ -139,3 +139,26 @@ async def test_recovers_after_cooldown_expires(monkeypatch):
     state = breaker._state_for("cheap")
     assert state.consecutive_failures == 0
     assert state.cooldown_until is None
+
+
+@pytest.mark.asyncio
+async def test_fallback_with_too_small_context_is_not_called(monkeypatch):
+    called = []
+
+    async def failing_primary(model, messages, **kwargs):
+        del messages, kwargs
+        called.append(model)
+        raise RuntimeError("primary unavailable")
+
+    monkeypatch.setattr(cb_module, "call_provider", failing_primary)
+    monkeypatch.setattr(cb_module, "estimate_tokens", lambda text: 300_000)
+    breaker = CircuitBreaker(
+        tier_models={
+            "qwen3-small": ["openai/qwen3-small", "openai/gemma"]
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="primary unavailable"):
+        await breaker.call("qwen3-small", [{"role": "user", "content": "large"}])
+
+    assert called == ["openai/qwen3-small"]

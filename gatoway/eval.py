@@ -4,9 +4,9 @@ artifact.
 Runs a small hand-written, held-out benchmark suite (eval split -- never
 written back to decision_history, see gatoway/batch_job.py) through two
 paths:
-    1. The router: decide() picks a tier per task, that tier's provider is
+    1. The router picks a model rung per task, then calls its provider.
        called.
-    2. An "always frontier" baseline: every task goes to the frontier tier.
+    2. An "always highest-rung" baseline: every task goes to the last rung.
 
 ...then reports cost (sum of cost_cents) and effectiveness (per-task exact
 match, fixture execution, or heuristic judge score -- see BenchmarkTask)
@@ -17,7 +17,7 @@ Runs standalone: it does NOT require the FastAPI gateway (gatoway/app.py) to
 be up. It talks to gatoway.router / gatoway.providers in-process.
 
 Modes:
-    --dry-run   Use canned per-tier responses instead of calling litellm.
+    --dry-run   Use canned response bands instead of calling litellm.
                 Auto-selected if NRP_API_KEY is not set in the
                 environment (with a printed notice -- never silently
                 guessed).
@@ -26,8 +26,8 @@ Modes:
 The router tier decision itself prefers a real DB round-trip
 (gatoway.router.classify() against the seeded decision_history bank, see
 gatoway/seed.py) but degrades gracefully to a standalone approximation
-(gatoway.router.decide() using the task's own difficulty label as a stand-in
-for a confident nearest-neighbor match) if Postgres isn't reachable, so this
+(gatoway.router.approximate_rung() using the task's own difficulty label) if
+Postgres isn't reachable, so this
 harness never hard-depends on a live DB either.
 
 Usage:
@@ -46,8 +46,14 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from gatoway.providers import MODEL_PARAMS_B, ProviderResponse, TIER_MODELS, call_provider
-from gatoway.router import DEFAULT_THRESHOLD, decide
+from gatoway.providers import (
+    MODEL_PARAMS_B,
+    RUNG_NAMES,
+    ProviderResponse,
+    TIER_MODELS,
+    call_provider,
+)
+from gatoway.router import DEFAULT_THRESHOLD, approximate_rung
 from gatoway.session import compute_threshold
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "docs" / "eval_report.md"
@@ -90,9 +96,9 @@ class BenchmarkTask:
     # match when no DB is reachable (see module docstring).
     difficulty: float
     split: str = "eval"  # SPEC.md §8: eval split, never written back
-    # Canned responses per tier for --dry-run mode, hand-authored to reflect
-    # a plausible quality gradient: cheap tiers do fine on easy tasks but
-    # give thinner/partially-wrong answers on hard ones; frontier is
+    # Canned responses in three quality bands for --dry-run mode, hand-authored
+    # to reflect a plausible gradient: cheap rungs do fine on easy tasks but
+    # give thinner/partially-wrong answers on hard ones; the high band is
     # consistently thorough. This is what makes the dry-run report tell a
     # non-degenerate story (not "everything scores identically").
     canned_responses: dict[str, str] = field(default_factory=dict)
@@ -459,7 +465,14 @@ def score_task(task: BenchmarkTask, response_text: str) -> float:
 
 
 async def _dry_run_provider(tier: str, task: BenchmarkTask) -> ProviderResponse:
-    content = task.canned_responses.get(tier, task.canned_responses.get("frontier", ""))
+    rung_index = RUNG_NAMES.index(tier)
+    if rung_index <= 1:
+        response_band = "cheap"
+    elif rung_index <= 4:
+        response_band = "medium"
+    else:
+        response_band = "frontier"
+    content = task.canned_responses.get(response_band, "")
     return ProviderResponse(
         content=content,
         model_id=f"dry-run/{tier}",
@@ -509,17 +522,9 @@ async def pick_router_tier(
             print(f"  [warn] classify() failed for {task.task_id!r} ({exc}); "
                   f"falling back to standalone difficulty-based routing")
 
-    # Standalone fallback: no DB, or classify() failed. Approximate what a
-    # populated bank would return by treating this task's own hand-labeled
-    # difficulty as a confident nearest-neighbor match.
-    decision = decide(
-        similarity=0.9,
-        difficulty=task.difficulty,
-        matched_routing_id=None,
-        input_embedding=[],
-        current_threshold=current_threshold,
-    )
-    return decision.tier
+    # Standalone fallback: no DB, or classify() failed. This approximation is
+    # eval-only; production always selects from per-model outcome evidence.
+    return approximate_rung(task.difficulty, current_threshold)
 
 
 @dataclass
@@ -564,10 +569,11 @@ async def run_eval(dry_run: bool, pool) -> tuple[list[TaskResult], list[TaskResu
             current_threshold=current_threshold,
         ))
 
-        baseline_response = await provider_fn("frontier", task)
+        baseline_tier = RUNG_NAMES[-1]
+        baseline_response = await provider_fn(baseline_tier, task)
         baseline_results.append(TaskResult(
             task_id=task.task_id,
-            tier="frontier",
+            tier=baseline_tier,
             cost_cents=baseline_response.cost_cents,
             score=score_task(task, baseline_response.content),
             current_threshold=current_threshold,
@@ -691,9 +697,9 @@ def build_report(
     )
 
     lines = []
-    lines.append("# Eval Report: Router vs Always-Frontier Baseline\n")
+    lines.append("# Eval Report: Router vs Always-Highest-Rung Baseline\n")
     lines.append(
-        ("_--dry-run: no real provider calls; scores come from canned per-tier responses._ "
+        ("_--dry-run: no real provider calls; scores come from canned response bands._ "
          if dry_run else
          "_Real calls against NRP-hosted models._ ")
         + "_Cost is a parameter-count proxy, not real spend: NRP has no per-token "
@@ -732,7 +738,7 @@ def build_report(
         f"{_mean_range(cost_reductions, pct_fmt, always_range=True)} {cost_word} "
         "reduction, "
         f"{effectiveness_delta_summary} "
-        "effectiveness delta vs always-frontier.**\n"
+        "effectiveness delta vs always-highest-rung.**\n"
     )
     lines.append(f"**Stability gate: {'PASS' if gate_passed else 'FAIL'}** — {gate_detail}.\n")
     lines.append(
@@ -759,7 +765,7 @@ def build_report(
         f"**Session totals (mean and range)** — Router: "
         f"{_mean_range(router_costs, cost_fmt, always_range=True)}, "
         f"{_mean_range([value * 100 for value in router_effectiveness], pct_fmt, always_range=True)} "
-        f"effective. Frontier baseline: "
+        f"effective. Highest-rung baseline: "
         f"{_mean_range(baseline_costs, cost_fmt, always_range=True)}, "
         f"{_mean_range([value * 100 for value in baseline_effectiveness], pct_fmt, always_range=True)} "
         "effective."
@@ -776,7 +782,7 @@ async def _try_get_pool():
         return pool
     except Exception as exc:
         print(f"[info] Postgres unavailable ({exc}); running eval in standalone mode "
-              f"(router tier decisions approximated from task difficulty labels, "
+              f"(router rung decisions approximated from task difficulty labels, "
               f"no decision_history lookups).")
         return None
 

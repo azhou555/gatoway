@@ -1,8 +1,8 @@
 # Design: Wide Model Ladder, Trustworthy Eval, and pgvector Task Decomposition
 
 **Date:** 2026-09-04
-**Status:** Implementation in progress — wide ladder configured; live rung
-evaluation and pruning remain
+**Status:** Wide ladder implemented; 2026-09-08 live gate failed on bank
+density and model effectiveness
 **Supersedes parts of:** the architecture spec v0.1, `SPEC.md` today,
 `docs/spec.md` after step 1 — see §3 below
 
@@ -431,11 +431,29 @@ for top-level requests.
 | 1 | Docs consolidation + spec v0.2 | Complete | — (no code) |
 | 2 | NRP characterization spike | Complete | rung table with latency + availability |
 | 3 | Eval rework | Complete | **Passed: 3 identical execution-scored runs** |
-| 4 | Wide ladder + router k-NN | Implemented; live eval pending | dead rungs pruned on evidence |
+| 4 | Wide ladder + router k-NN | Implemented; live gate failed | dead rungs pruned on evidence |
 | 5 | Decomposition | Not started | **cost-per-passing-outcome beats one frontier call** |
 
 Steps 3 and 5 are real gates. If step 3 does not stabilize, step 4 does not
 start.
+
+### 8.1 Wide-ladder gate result
+
+The first isolated live run on 2026-09-08 used 24 rows (three assigned to
+each rung) and repeated the eight-task session three times. Proxy-cost savings
+were effectively unchanged at 40.0%, but the effectiveness delta deteriorated
+from -1.0 point under the three-tier router to -16.7 points. `minimax-m2`
+failed `code_fix` in all three runs and was inconsistent on `sql_query`, so
+the deterministic stability gate failed.
+
+Inspection of each task's five neighbors exposed the underlying routing
+problem: spreading three rows across each rung provides global coverage but
+not two observations per model inside each semantic neighborhood. Only the
+capital task found two same-rung confident observations. Most other decisions
+therefore took the cold-start rung or the highest single observed rung rather
+than a model that satisfied `MIN_OBSERVATIONS`. The next iteration must densify
+evidence per task cluster (or fetch neighbors per model) before dead-rung
+pruning is meaningful.
 
 **Each step gets its own implementation plan.** This document is the design
 for the pivot as a whole; it is deliberately too large to implement in one
@@ -444,7 +462,7 @@ each want their own, written against what the preceding gate actually
 produced — writing step 4's plan before step 3's numbers exist would be
 planning against assumptions this design exists to avoid.
 
-### 8.1 What the characterization spike covers
+### 8.2 What the characterization spike covers
 
 Mostly done during the NRP migration; what remains:
 

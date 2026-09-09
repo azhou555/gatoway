@@ -451,9 +451,15 @@ problem: spreading three rows across each rung provides global coverage but
 not two observations per model inside each semantic neighborhood. Only the
 capital task found two same-rung confident observations. Most other decisions
 therefore took the cold-start rung or the highest single observed rung rather
-than a model that satisfied `MIN_OBSERVATIONS`. The next iteration must densify
-evidence per task cluster (or fetch neighbors per model) before dead-rung
-pruning is meaningful.
+than a model that satisfied `MIN_OBSERVATIONS`.
+
+The follow-up changes retrieval to fetch up to five scored neighbors per
+configured model, preventing globally dense models and unscored requests from
+crowding out evidence for other rungs. A single high-rung observation can no
+longer promote a request: if no rung satisfies both `MIN_OBSERVATIONS` and the
+effectiveness bar, routing explicitly falls back to `gpt-oss`. The next live
+gate determines which task clusters still need denser evidence before
+dead-rung pruning is meaningful.
 
 **Each step gets its own implementation plan.** This document is the design
 for the pivot as a whole; it is deliberately too large to implement in one

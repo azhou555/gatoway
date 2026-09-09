@@ -1,8 +1,9 @@
 """Evidence-based routing over the configured NRP model ladder.
 
-The router embeds an incoming request, fetches its nearest historical
-neighbors, and selects the cheapest context-capable rung with enough evidence
-that its mean observed effectiveness clears the current session's bar.
+The router embeds an incoming request, fetches each configured model's nearest
+scored historical neighbors, and selects the cheapest context-capable rung
+with enough evidence that its mean observed effectiveness clears the current
+session's bar.
 
 Error contract: ``classify()`` deliberately propagates embedding and database
 errors. The gateway layer owns classifier-failure handling; hiding failures
@@ -24,7 +25,7 @@ CONFIDENCE_FLOOR = 0.3
 DEFAULT_THRESHOLD = 0.5
 THRESHOLD_SHIFT_SCALE = 0.5
 
-NEIGHBOR_COUNT = 5
+NEIGHBORS_PER_MODEL = 5
 EFFECTIVENESS_BAR = 0.7
 MIN_OBSERVATIONS = 2
 
@@ -92,6 +93,7 @@ def _model_rung_names() -> dict[str, str]:
 
 
 MODEL_RUNG_NAMES = _model_rung_names()
+ROUTABLE_MODEL_IDS = tuple(MODEL_RUNG_NAMES)
 
 
 def _context_capable_rungs(input_tokens: int) -> tuple[str, ...]:
@@ -186,18 +188,16 @@ def decide(
                 rung.name, rung_observations, input_embedding, bar, low_confidence=False
             )
 
-    # No evidenced rung cleared the bar. Avoid inventing evidence for a model:
-    # use the highest context-capable rung actually represented by a confident
-    # neighbor, as specified by the wide-ladder design.
-    for rung in reversed(MODEL_LADDER):
-        if rung.name in capable and by_rung.get(rung.name):
-            return _routing_decision(
-                rung.name, by_rung[rung.name], input_embedding, bar, low_confidence=False
-            )
-
+    # A single nearby outcome (or several ineffective outcomes) is not enough
+    # evidence to promote. Fall back explicitly until a rung clears the same
+    # minimum-observation and effectiveness requirements used above.
     fallback = fallback_rung_for_tokens(input_tokens)
+    fallback_observations = by_rung.get(fallback, [])
+    metadata_observations = fallback_observations or sorted(
+        confident, key=lambda item: item.similarity, reverse=True
+    )[:1]
     return _routing_decision(
-        fallback, confident[:1], input_embedding, bar, low_confidence=True
+        fallback, metadata_observations, input_embedding, bar, low_confidence=True
     )
 
 
@@ -218,19 +218,31 @@ def approximate_rung(
 async def classify(
     text: str, pool, current_threshold: float = DEFAULT_THRESHOLD
 ) -> RoutingDecision:
-    """Embed ``text``, fetch top-k neighbors, and make a ladder decision."""
+    """Embed ``text``, fetch top-k scored neighbors/model, and decide."""
     vector = embed(text)
     rows = await pool.fetch(
         """
+        WITH ranked AS (
+            SELECT routing_id, model_id, calculated_effectiveness,
+                   calculated_difficulty,
+                   1 - (input_embedding <=> $1) AS similarity,
+                   row_number() OVER (
+                       PARTITION BY model_id
+                       ORDER BY input_embedding <=> $1
+                   ) AS model_neighbor_rank
+            FROM decision_history
+            WHERE input_embedding IS NOT NULL
+              AND calculated_effectiveness IS NOT NULL
+              AND model_id = ANY($3::text[])
+        )
         SELECT routing_id, model_id, calculated_effectiveness,
-               calculated_difficulty,
-               1 - (input_embedding <=> $1) AS similarity
-        FROM decision_history
-        WHERE input_embedding IS NOT NULL
-        ORDER BY input_embedding <=> $1
-        LIMIT $2
+               calculated_difficulty, similarity
+        FROM ranked
+        WHERE model_neighbor_rank <= $2
+        ORDER BY similarity DESC
         """,
         vector,
-        NEIGHBOR_COUNT,
+        NEIGHBORS_PER_MODEL,
+        ROUTABLE_MODEL_IDS,
     )
     return decide(rows, vector, estimate_tokens(text), current_threshold)

@@ -13,7 +13,8 @@ from gatoway.router import (
     EFFECTIVENESS_BAR,
     FALLBACK_RUNG,
     MIN_OBSERVATIONS,
-    NEIGHBOR_COUNT,
+    NEIGHBORS_PER_MODEL,
+    ROUTABLE_MODEL_IDS,
     NeighborObservation,
     RequestTooLargeError,
     approximate_rung,
@@ -121,15 +122,27 @@ def test_request_larger_than_every_context_window_is_rejected():
         decide([], FAKE_EMBEDDING, input_tokens=1_048_577)
 
 
-def test_when_no_rung_clears_bar_highest_observed_rung_wins():
+def test_when_no_rung_clears_bar_explicit_fallback_wins():
     neighbors = [
         observation("gemma-small", 0.2, index=1),
         observation("gemma-small", 0.2, index=2),
-        observation("gpt-oss", 0.3, index=3),
-        observation("gpt-oss", 0.3, index=4),
+        observation("kimi", 1.0, index=3),
     ]
 
-    assert decide(neighbors, FAKE_EMBEDDING, 100).tier == "gpt-oss"
+    decision = decide(neighbors, FAKE_EMBEDDING, 100)
+
+    assert decision.tier == FALLBACK_RUNG
+    assert decision.low_confidence is True
+
+
+def test_single_observation_cannot_promote_from_fallback():
+    decision = decide(
+        [observation("kimi", 1.0, index=1)], FAKE_EMBEDDING, input_tokens=100
+    )
+
+    assert decision.tier == FALLBACK_RUNG
+    assert decision.low_confidence is True
+    assert decision.observation_count == 1
 
 
 def test_token_estimate_rounds_up_and_offline_approximation_spans_ladder():
@@ -150,10 +163,15 @@ async def test_classify_fetches_top_k_with_model_outcomes(monkeypatch):
     from gatoway import router as router_module
 
     class Pool:
-        async def fetch(self, query, vector, limit):
+        async def fetch(self, query, vector, limit, model_ids):
             assert "model_id" in query
             assert "calculated_effectiveness" in query
-            assert limit == NEIGHBOR_COUNT
+            assert "PARTITION BY model_id" in query
+            assert "calculated_effectiveness IS NOT NULL" in query
+            assert "model_neighbor_rank <= $2" in query
+            assert "model_id = ANY($3::text[])" in query
+            assert limit == NEIGHBORS_PER_MODEL
+            assert model_ids == ROUTABLE_MODEL_IDS
             assert vector == FAKE_EMBEDDING
             return [
                 {

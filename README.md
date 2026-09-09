@@ -55,8 +55,10 @@ uvicorn gatoway.app:app --reload
 
 All rungs are NRP-hosted open-weights models served from a single
 OpenAI-compatible endpoint (`https://ellm.nrp-nautilus.io/v1`). The router
-selects the cheapest rung with at least two effective observations among its
-five nearest neighbors. Every rung has a context-aware provider fallback:
+selects the cheapest rung with at least two effective observations among up to
+five nearest scored neighbors per configured model. If no rung clears that
+evidence bar, it explicitly uses `gpt-oss`. Every rung has a context-aware
+provider fallback:
 
 | Rung | Primary | Params | Context | Fallback |
 |---:|---|---:|---:|---|

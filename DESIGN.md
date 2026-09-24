@@ -1305,7 +1305,7 @@ Commits `31c8541` (first gate), `0201467` (fix), `47ee191` (re-gate).
 
 ## Phase 10: Leakage audit and bank densification (2026-09-24)
 
-Plan: `docs/plans/2026-09-24-bank-densification.md`. Task 1 implemented; Tasks 2–4 pending.
+Plan: `docs/plans/2026-09-24-bank-densification.md`. Tasks 1–2 implemented; Tasks 3–4 pending.
 
 ### 10.1 Seed-time leakage found and recorded before fixing it
 
@@ -1363,7 +1363,30 @@ Plan: `docs/plans/2026-09-24-bank-densification.md`. Task 1 implemented; Tasks 2
 - **Decision on the old seed rows**: drop them once measured rows exist. Their
   effectiveness values are assumptions that all clear the bar, so they dilute
   measured evidence with guesses.
-- **Status**: *Planned.*
+- **Status**: *Corpus built* (`gatoway/bank_corpus.py`, 20 prompts across 8
+  neighborhoods); bootstrap harness and re-gate pending.
+
+### 10.3 Execution fixtures are per prompt, because an answer is a task
+
+- **Finding**: each execution scorer accepted exactly one answer — a loop
+  that prints every element, a query for the second-highest salary. Any train
+  prompt scored by those fixtures, however reworded, has the eval task's
+  answer, so it *is* the eval task. That is leakage the character-ratio guard
+  of §10.1 cannot see.
+- **Decision**: both scorers take a `fixtures=` keyword defaulting to the
+  eval's own fixtures, and each train execution prompt carries its own target
+  output, its own tables and its own SQL function allowlist. The allowlist
+  stays per fixture so widening it for `COUNT`/`SUM` cannot loosen eval
+  scoring.
+- **Guard**: `tests/test_bank_corpus.py` asserts the eval `code_fix` and
+  `sql_query` reference answers score 0.0 on every train execution prompt,
+  and that every train prompt's own reference answer scores 1.0 — so an
+  unanswerable prompt is caught before any model call is spent on it.
+- **Tradeoff**: data, not new scorers — the sandboxed grammar is unchanged,
+  so train Python prompts steer answers toward editing `range()` (slices and
+  `reversed` are rejected by the grammar). A correct answer outside that
+  grammar scores 0.0, the same false-negative risk the eval task already
+  carries.
 
 ---
 

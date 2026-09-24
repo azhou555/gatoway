@@ -152,18 +152,31 @@ eval suite so the density lands where the gate measures:
 
 20 prompts × 8 rungs = 160 rows, 160 model calls per bootstrap run.
 
-- [ ] **Step 1: Write the failing test.** Assert: every `prompt_id` is unique;
+- [x] **Step 1: Write the failing test.** Assert: every `prompt_id` is unique;
   every `scoring_method` is one `score_task` handles; every neighborhood has at
   least 2 prompts (so `MIN_OBSERVATIONS = 2` is satisfiable within it); and
   `assert_no_eval_overlap(TRAIN_PROMPTS)` passes.
-- [ ] **Step 2: Verify it fails** (module does not exist yet).
-- [ ] **Step 3: Write `gatoway/bank_corpus.py`.** The `python_execution` and
+- [x] **Step 2: Verify it fails** (module does not exist yet).
+- [x] **Step 3: Write `gatoway/bank_corpus.py`.** The `python_execution` and
   `sql_execution` prompts must be answerable within the scorers' constrained
   languages — a single `for` loop over `arr`/`n` for Python, a read-only
   `SELECT` for SQL. Reuse the existing scorers; do not write new ones. Add
   fixtures for any new SQL/Python shape, or reword the prompt to fit the
   existing fixtures — prefer rewording.
-- [ ] **Step 4: Green, then full suite.**
+- [x] **Step 4: Green, then full suite.**
+
+**Deviation (implemented):** "prefer rewording to fit the existing fixtures"
+was wrong. Each execution scorer checked exactly one answer (print every
+element; second-highest salary), so a reworded prompt that passes those
+fixtures *is* the eval task — a semantic leak the character guard cannot see.
+Instead both scorers take a `fixtures=` keyword defaulting to the eval's
+fixtures (eval scoring unchanged, its tests untouched), and each train
+execution prompt carries its own targets, tables and SQL function allowlist.
+`TrainPrompt` also gained `reference` (a known-good answer; doubles as the
+Task 3 dry-run response). `tests/test_bank_corpus.py` asserts every reference
+scores 1.0 and that the eval `code_fix`/`sql_query` answers score 0.0 on every
+train execution prompt.
+
 
 ---
 

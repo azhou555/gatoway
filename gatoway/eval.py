@@ -313,8 +313,15 @@ def _safe_python_tree(candidate: str) -> ast.Module | None:
     return tree
 
 
-def score_python_execution(response: str) -> float:
-    """Execute a constrained loop against fixtures for the off-by-one task."""
+# (arr contents, expected print() calls). The default is the eval code_fix
+# task: print every element. Train prompts pass their own targets.
+PYTHON_FIXTURES: tuple[tuple[list[int], list[tuple[object, ...]]], ...] = tuple(
+    (values, [(value,) for value in values]) for values in ([10, 20, 30], [7], [])
+)
+
+
+def score_python_execution(response: str, fixtures=PYTHON_FIXTURES) -> float:
+    """Execute a constrained loop against (arr, expected prints) fixtures."""
     if re.search(
         r"^\s*(?:from\s+\S+\s+import|import|while|def|class)\b",
         response,
@@ -322,14 +329,13 @@ def score_python_execution(response: str) -> float:
     ):
         return 0.0
 
-    fixtures = ([10, 20, 30], [7], [])
     for candidate in _python_candidates(response):
         tree = _safe_python_tree(candidate)
         if tree is None:
             continue
 
         passed = True
-        for values in fixtures:
+        for values, expected in fixtures:
             printed: list[tuple[object, ...]] = []
 
             def capture_print(*args, **kwargs):
@@ -350,7 +356,7 @@ def score_python_execution(response: str) -> float:
             except Exception:  # A candidate that does not run simply fails the fixture.
                 passed = False
                 break
-            if printed != [(value,) for value in values]:
+            if printed != expected:
                 passed = False
                 break
         if passed:
@@ -378,22 +384,36 @@ def _sql_candidates(response: str) -> list[str]:
     return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 
-def _run_salary_query(query: str, salaries: list[int]) -> list[tuple[object, ...]] | None:
+def _employees_setup(salaries: list[int]) -> str:
+    rows = ", ".join(f"('employee-{index}', {salary})" for index, salary in enumerate(salaries))
+    return (
+        "CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT, salary INTEGER);"
+        f"INSERT INTO employees (name, salary) VALUES {rows};"
+    )
+
+
+# (setup script, expected rows). The default is the eval sql_query task:
+# second-highest distinct salary, with duplicate top salaries.
+SQL_FIXTURES: tuple[tuple[str, list[tuple[object, ...]]], ...] = (
+    (_employees_setup([100, 100, 90, 80]), [(90,)]),
+    (_employees_setup([50, 40, 40, 30]), [(40,)]),
+    (_employees_setup([7, 3]), [(3,)]),
+)
+SQL_FUNCTIONS = frozenset({"max", "dense_rank", "row_number"})
+
+
+def _run_query(
+    query: str, setup: str, allowed_functions: frozenset[str]
+) -> list[tuple[object, ...]] | None:
     if not re.match(r"\s*(SELECT|WITH)\b", query, re.IGNORECASE):
         return None
 
     connection = sqlite3.connect(":memory:")
     try:
-        connection.execute(
-            "CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT, salary INTEGER)"
-        )
-        connection.executemany(
-            "INSERT INTO employees (name, salary) VALUES (?, ?)",
-            [(f"employee-{index}", salary) for index, salary in enumerate(salaries)],
-        )
+        # Trusted fixture SQL runs before the authorizer is installed.
+        connection.executescript(setup)
 
         allowed_actions = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ}
-        allowed_functions = {"max", "dense_rank", "row_number"}
 
         def authorize(action, _arg1, arg2, _database, _trigger):
             if action == sqlite3.SQLITE_FUNCTION:
@@ -413,17 +433,14 @@ def _run_salary_query(query: str, salaries: list[int]) -> list[tuple[object, ...
         connection.close()
 
 
-def score_sql_execution(response: str) -> float:
-    """Run a read-only query against fixtures with duplicate top salaries."""
-    fixtures = (
-        ([100, 100, 90, 80], [(90,)]),
-        ([50, 40, 40, 30], [(40,)]),
-        ([7, 3], [(3,)]),
-    )
+def score_sql_execution(
+    response: str, fixtures=SQL_FIXTURES, allowed_functions=SQL_FUNCTIONS
+) -> float:
+    """Run a read-only query against (setup script, expected rows) fixtures."""
     for candidate in _sql_candidates(response):
         if all(
-            _run_salary_query(candidate, salaries) == expected
-            for salaries, expected in fixtures
+            _run_query(candidate, setup, allowed_functions) == expected
+            for setup, expected in fixtures
         ):
             return 1.0
     return 0.0

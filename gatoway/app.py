@@ -8,10 +8,10 @@ built in earlier subtasks:
 
 Per SPEC.md §5's fallback state machine:
 - `classify()` raising (embedding/DB error) -> `call_with_classifier_fallback`
-  (medium tier, single request, bypasses the breaker entirely).
-- `classify()` succeeding -> the chosen tier is called through the
+  (`gpt-oss` rung, single request, bypasses the breaker entirely).
+- `classify()` succeeding -> the chosen rung is called through the
   `CircuitBreaker`, which itself retries once with a different provider in
-  the tier and trips a 60s cooldown after 3 consecutive failures
+  the rung and trips a 60s cooldown after 3 consecutive failures
   (`TierInCooldownError`).
 - If every avenue is exhausted, the endpoint returns a 503 in an
   OpenAI-compatible error shape instead of crashing.
@@ -40,7 +40,13 @@ from gatoway.circuit_breaker import (
 from gatoway.db import close_pool, get_pool
 from gatoway.embeddings import embed
 from gatoway.providers import ProviderResponse
-from gatoway.router import classify
+from gatoway.router import (
+    FALLBACK_RUNG,
+    RequestTooLargeError,
+    classify,
+    estimate_tokens,
+    fallback_rung_for_tokens,
+)
 from gatoway.session import SessionTracker
 
 logger = logging.getLogger("gatoway")
@@ -122,10 +128,15 @@ async def chat_completions(request: ChatCompletionRequest) -> JSONResponse:
         confidence = decision.confidence
         calculated_difficulty = decision.calculated_difficulty
         input_embedding = decision.input_embedding
+    except RequestTooLargeError as exc:
+        return _error_response(400, str(exc), "context_length_exceeded")
     except Exception as exc:  # noqa: BLE001 - classifier errors are opaque by contract
-        logger.warning("classifier failed, falling back to medium tier: %s", exc)
+        try:
+            tier = fallback_rung_for_tokens(estimate_tokens(input_text))
+        except RequestTooLargeError as context_exc:
+            return _error_response(400, str(context_exc), "context_length_exceeded")
+        logger.warning("classifier failed, falling back to %s: %s", tier, exc)
         classifier_failed = True
-        tier = "medium"
         confidence = None
         calculated_difficulty = None
         input_embedding = embed(input_text)
@@ -134,9 +145,11 @@ async def chat_completions(request: ChatCompletionRequest) -> JSONResponse:
     response: ProviderResponse | None = None
     try:
         if classifier_failed:
-            response = await call_with_classifier_fallback(messages)
+            response = await call_with_classifier_fallback(messages, rung=tier)
         else:
             response = await breaker.call(tier, messages)
+    except RequestTooLargeError as exc:
+        return _error_response(400, str(exc), "context_length_exceeded")
     except TierInCooldownError as exc:
         provider_error = f"tier '{exc.tier}' is temporarily unavailable (cooldown for {exc.retry_after:.0f}s more)"
     except Exception as exc:  # noqa: BLE001 - provider/breaker errors are opaque

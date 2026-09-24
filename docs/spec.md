@@ -1,15 +1,13 @@
-# Cost-Aware LLM Gateway — Architecture Spec (v0.2)
+# Cost-Aware LLM Gateway — Architecture Spec (v0.3)
 
-> v0.2 (2026-09-04) moved every provider tier onto NRP-hosted open-weights
-> models and reconciled this document with the implementation. The wide
-> model ladder that replaces the three-tier scheme is designed in
-> `docs/specs/2026-09-04-wide-ladder-design.md`; this spec describes the
-> system as built.
+> v0.3 (2026-09-07) implements the wide NRP model ladder and replaces static
+> difficulty buckets with top-k, per-model effectiveness evidence. The design
+> rationale lives in `docs/specs/2026-09-04-wide-ladder-design.md`.
 
 ## 1. Goal
 
 Build a proxy gateway that sits in front of multiple LLM providers and routes each
-request to the cheapest model tier likely to produce an acceptable result, using
+request to the cheapest model rung likely to produce an acceptable result, using
 embedding-similarity matching against a growing bank of past requests and
 session-level difficulty signals — rather than static per-request rules.
 
@@ -31,7 +29,7 @@ flowchart TB
     GW --> ROUTE[Router / Classifier]
     ROUTE -->|embedding query| VDB[(pgvector: embedding bank)]
     ROUTE -->|session state| SESS
-    ROUTE -->|tier decision| CB[Circuit Breaker / Fallback]
+    ROUTE -->|rung decision| CB[Circuit Breaker / Fallback]
     CB -->|selected provider call| PROV[Provider Adapter<br/>NRP OpenAI-compatible endpoint]
     PROV --> GW
     GW -->|log decision + outcome| PG[(Postgres: spend ledger,<br/>decision history)]
@@ -50,13 +48,31 @@ flowchart TB
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | Gateway API                | OpenAI-compatible entrypoint, request/response logging                                                                                                    | —                                        |
 | Session Tracker            | Detects session boundaries via task keywords; tracks turn count, elapsed time                                                                             | Redis (live), Postgres (closed sessions) |
-| Router / Classifier        | Embeds incoming request, queries nearest neighbors in pgvector, applies threshold (shifted by session state) to pick a tier                               | pgvector                                 |
-| Circuit Breaker / Fallback | Handles classifier failure (→ the fallback rung, single request) and provider failure (→ retry same tier, different provider; 3 consecutive failures → 60s cooldown) | Redis                                    |
-| Provider Adapters          | Thin litellm wrapper over NRP's single OpenAI-compatible endpoint; tier -> model list + parameter-count cost proxy                                       | —                                        |
+| Router / Classifier        | Embeds incoming request, queries up to five nearest scored neighbors per configured model, and picks the cheapest context-capable model with enough observed effectiveness to clear the session-adjusted bar; otherwise uses the explicit fallback | pgvector                                 |
+| Circuit Breaker / Fallback | Handles classifier failure (→ the fallback rung, single request) and provider failure (→ retry same rung, different model; 3 consecutive failures → 60s cooldown) | Redis                                    |
+| Provider Adapters          | Thin litellm wrapper over NRP's single OpenAI-compatible endpoint; ordered rung table + parameter-count cost proxy                                        | —                                        |
 | Spend Ledger               | Per-team budget, usage, running average session difficulty                                                                                                | Postgres                                 |
 | Decision History           | Every routing decision + eventual outcome, feeds the embedding bank                                                                                       | Postgres + pgvector                      |
 | Batch Feedback Job         | Runs at session end: scores session quality, writes new embedding + outcome to bank                                                                       | —                                        |
 | Eval Harness               | Runs benchmark suite against the live router, computes effectiveness/cost                                                                                 | Separate offline tool                    |
+
+### Model ladder
+
+| Rung | Primary model | Params | NRP context |
+|---:|---|---:|---:|
+| 0 | `gemma-small` | 12B | 262,144 |
+| 1 | `qwen3-small` | 27B | 1,000,000 |
+| 2 | `gpt-oss` | 120B | 131,072 |
+| 3 | `qwen3` | 180B | 1,000,000 |
+| 4 | `minimax-m2` | 230B | 204,800 |
+| 5 | `deepseek-v4-flash` | 304B | 1,048,576 |
+| 6 | `glm-5` | 753B | 1,048,576 |
+| 7 | `kimi` | 1T | 131,072 |
+
+The cost order uses total parameter count because NRP publishes no token
+prices and active-parameter figures are incomplete. Context is a hard filter.
+Rung 2 is the normal low-confidence/classifier-failure fallback; if it cannot
+hold a request, routing uses the cheapest context-capable rung instead.
 
 ---
 
@@ -116,8 +132,8 @@ CREATE TABLE decision_history (
 
 Notes:
 
-- `confidence` is what implements the "no good match" fallback: if the top-k
-  neighbor similarity is below a set floor, route to the fallback rung and
+- `confidence` is what implements the "no good match" fallback: if no top-k
+  neighbor similarity clears the floor, route to the fallback rung and
   mark the row low-confidence rather than trusting a weak match.
 - Embedding model: `all-MiniLM-L6-v2`, 384 dimensions. Chosen so the demo runs
   without an embedding API key.
@@ -160,8 +176,9 @@ stateDiagram-v2
 3. **Live threshold shift:** as turn count grows _relative to
    `expected_turn_count`_ (from the benchmark difficulty label if the task
    matches a known type, otherwise relative to the historical average for the
-   nearest-neighbor cluster), raise `current_threshold` — this pulls in
-   higher tiers for the remainder of the session. This normalization step is
+   nearest-neighbor cluster), raise `current_threshold` — this raises the
+   required effectiveness bar and pulls in higher rungs for the remainder of
+   the session. This normalization step is
    what prevents a naturally multi-turn task from being misread as "the model
    is struggling."
 4. **Session end:** detected via keyword/topic drift or explicit timeout.
@@ -190,7 +207,14 @@ stateDiagram-v2
   synthetic tasks before any real traffic — this also solves the cold-start
   problem for the router without needing a separate heuristic scorer.
 - Held-out **eval-only** split is never written back to the bank.
-- Primary reported metric: effectiveness/cost vs an "always frontier model"
+- **Seed rows are a leak path too.** "Train-only" constrains the *prompts*, not
+  just the write path: a hand-authored seed row that restates an eval prompt
+  puts the eval set in the bank at similarity ≈ 1.0, and `batch_job.py`'s
+  split gate never sees it. A 2026-09-24 audit found five of the eight eval
+  prompts in `gatoway/seed.py`, three verbatim — see the correction in
+  `docs/specs/2026-09-04-wide-ladder-design.md` §8.1. Any prompt written into
+  the bank must be checked for similarity against `eval.BENCHMARK_TASKS`.
+- Primary reported metric: effectiveness/cost vs an "always highest-rung model"
   baseline, across a full simulated session (not just single requests) —
   this is what demonstrates the min-maxing story: e.g. "63% cost reduction,
   2% effectiveness drop" as a headline number.

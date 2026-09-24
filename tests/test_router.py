@@ -1,145 +1,208 @@
-"""Unit tests for gatoway/router.py's pure decision logic.
-
-Uses the `decide()` function directly with fake similarity/difficulty
-values -- no real DB or embedding model involved, per TASKS.md's testing
-guidance for Subtask 3.
-"""
+"""Unit coverage for evidence-based wide-ladder selection."""
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
+from gatoway.providers import RUNG_NAMES
 from gatoway.router import (
     CONFIDENCE_FLOOR,
     DEFAULT_THRESHOLD,
-    DIFFICULTY_CHEAP_MAX,
-    DIFFICULTY_MEDIUM_MAX,
-    FALLBACK_TIER,
+    EFFECTIVENESS_BAR,
+    FALLBACK_RUNG,
+    MIN_OBSERVATIONS,
+    NEIGHBORS_PER_MODEL,
+    ROUTABLE_MODEL_IDS,
+    NeighborObservation,
+    RequestTooLargeError,
+    approximate_rung,
+    classify,
     decide,
+    estimate_tokens,
 )
+from gatoway.seed import build_seed_rows
 
 FAKE_EMBEDDING = [0.1, 0.2, 0.3]
 
 
-def test_below_confidence_floor_triggers_fallback():
-    decision = decide(
-        similarity=CONFIDENCE_FLOOR - 0.01,
-        difficulty=0.1,  # would otherwise bucket as "cheap"
-        matched_routing_id="some-id",
-        input_embedding=FAKE_EMBEDDING,
+def observation(model: str, effectiveness: float, similarity: float = 0.9, index: int = 1):
+    return NeighborObservation(
+        routing_id=f"id-{index}",
+        model_id=f"openai/{model}",
+        effectiveness=effectiveness,
+        difficulty=0.5,
+        similarity=similarity,
     )
+
+
+def test_cheapest_rung_with_enough_effective_observations_wins():
+    neighbors = [
+        observation("gemma-small", 0.8, index=1),
+        observation("gemma-small", 0.9, index=2),
+        observation("qwen3-small", 0.95, index=3),
+        observation("qwen3-small", 0.95, index=4),
+    ]
+
+    decision = decide(neighbors, FAKE_EMBEDDING, input_tokens=100)
+
+    assert decision.tier == "gemma-small"
+    assert decision.observation_count == MIN_OBSERVATIONS
+    assert decision.effectiveness_bar == EFFECTIVENESS_BAR
+
+
+def test_rung_under_minimum_observations_is_skipped():
+    neighbors = [
+        observation("gemma-small", 0.99),
+        observation("qwen3-small", 0.8, index=2),
+        observation("qwen3-small", 0.9, index=3),
+    ]
+
+    assert decide(neighbors, FAKE_EMBEDDING, 100).tier == "qwen3-small"
+
+
+def test_shared_gemma_fallback_evidence_counts_for_qwen3_small_rung():
+    neighbors = [
+        observation("gemma", 0.8, index=1),
+        observation("gemma", 0.9, index=2),
+    ]
+
+    assert decide(neighbors, FAKE_EMBEDDING, 100).tier == "qwen3-small"
+
+
+def test_context_constraint_skips_a_cheaper_proven_rung():
+    neighbors = [
+        observation("gemma-small", 0.9, index=1),
+        observation("gemma-small", 0.9, index=2),
+        observation("qwen3-small", 0.9, index=3),
+        observation("qwen3-small", 0.9, index=4),
+    ]
+
+    decision = decide(neighbors, FAKE_EMBEDDING, input_tokens=300_000)
+
+    assert decision.tier == "qwen3-small"
+
+
+def test_higher_session_threshold_raises_bar_and_promotes_rung():
+    neighbors = [
+        observation("gemma-small", 0.8, index=1),
+        observation("gemma-small", 0.8, index=2),
+        observation("qwen3-small", 0.95, index=3),
+        observation("qwen3-small", 0.95, index=4),
+    ]
+
+    baseline = decide(neighbors, FAKE_EMBEDDING, 100, DEFAULT_THRESHOLD)
+    shifted = decide(neighbors, FAKE_EMBEDDING, 100, 0.8)
+
+    assert baseline.tier == "gemma-small"
+    assert shifted.tier == "qwen3-small"
+    assert shifted.effectiveness_bar > baseline.effectiveness_bar
+
+
+def test_below_confidence_floor_uses_named_fallback():
+    weak = [observation("gemma-small", 1.0, CONFIDENCE_FLOOR - 0.01)]
+
+    decision = decide(weak, FAKE_EMBEDDING, 100)
+
+    assert decision.tier == FALLBACK_RUNG
     assert decision.low_confidence is True
-    assert decision.tier == FALLBACK_TIER
+    assert decision.confidence == CONFIDENCE_FLOOR - 0.01
 
 
-def test_no_match_at_all_triggers_fallback():
-    decision = decide(
-        similarity=None,
-        difficulty=None,
-        matched_routing_id=None,
-        input_embedding=FAKE_EMBEDDING,
-    )
+def test_empty_bank_uses_cheapest_context_capable_rung_for_large_input():
+    decision = decide([], FAKE_EMBEDDING, input_tokens=300_000)
+
+    assert decision.tier == "qwen3-small"
     assert decision.low_confidence is True
-    assert decision.tier == FALLBACK_TIER
-    assert decision.confidence == 0.0
 
 
-def test_confidence_at_floor_is_not_low_confidence():
-    # floor is inclusive on the "good" side: similarity == floor should pass.
+def test_request_larger_than_every_context_window_is_rejected():
+    with pytest.raises(RequestTooLargeError, match="largest configured context"):
+        decide([], FAKE_EMBEDDING, input_tokens=1_048_577)
+
+
+def test_when_no_rung_clears_bar_explicit_fallback_wins():
+    neighbors = [
+        observation("gemma-small", 0.2, index=1),
+        observation("gemma-small", 0.2, index=2),
+        observation("kimi", 1.0, index=3),
+    ]
+
+    decision = decide(neighbors, FAKE_EMBEDDING, 100)
+
+    assert decision.tier == FALLBACK_RUNG
+    assert decision.low_confidence is True
+
+
+def test_single_observation_cannot_promote_from_fallback():
     decision = decide(
-        similarity=CONFIDENCE_FLOOR,
-        difficulty=0.1,
-        matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING,
+        [observation("kimi", 1.0, index=1)], FAKE_EMBEDDING, input_tokens=100
     )
-    assert decision.low_confidence is False
+
+    assert decision.tier == FALLBACK_RUNG
+    assert decision.low_confidence is True
+    assert decision.observation_count == 1
 
 
-def test_tier_bucketing_cheap():
-    decision = decide(
-        similarity=0.9,
-        difficulty=DIFFICULTY_CHEAP_MAX - 0.01,
-        matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING,
-    )
-    assert decision.tier == "cheap"
+def test_token_estimate_rounds_up_and_offline_approximation_spans_ladder():
+    assert estimate_tokens("abcde") == 2
+    assert approximate_rung(0.0) == "gemma-small"
+    assert approximate_rung(1.0) == "kimi"
 
 
-def test_tier_bucketing_medium():
-    decision = decide(
-        similarity=0.9,
-        difficulty=(DIFFICULTY_CHEAP_MAX + DIFFICULTY_MEDIUM_MAX) / 2,
-        matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING,
-    )
-    assert decision.tier == "medium"
+def test_cold_start_seed_has_three_observations_per_rung():
+    counts = Counter(row["tier"] for row in build_seed_rows())
 
-
-def test_tier_bucketing_frontier():
-    decision = decide(
-        similarity=0.9,
-        difficulty=DIFFICULTY_MEDIUM_MAX + 0.01,
-        matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING,
-    )
-    assert decision.tier == "frontier"
-
-
-def test_higher_session_threshold_pulls_in_higher_tier():
-    # A difficulty that buckets to "medium" at the default threshold should
-    # be pulled up to "frontier" once current_threshold is raised enough
-    # (SPEC.md §6 point 3).
-    difficulty = DIFFICULTY_MEDIUM_MAX - 0.01
-
-    baseline = decide(
-        similarity=0.9,
-        difficulty=difficulty,
-        matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING,
-        current_threshold=DEFAULT_THRESHOLD,
-    )
-    shifted = decide(
-        similarity=0.9,
-        difficulty=difficulty,
-        matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING,
-        current_threshold=0.9,
-    )
-    assert baseline.tier == "medium"
-    assert shifted.tier == "frontier"
-
-
-def test_higher_threshold_never_lowers_tier():
-    # Sanity: shift is monotonic non-negative as current_threshold rises
-    # above the default -- it should never *demote* a tier.
-    difficulty = 0.1  # solidly "cheap"
-    low = decide(
-        similarity=0.9, difficulty=difficulty, matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING, current_threshold=DEFAULT_THRESHOLD,
-    )
-    high = decide(
-        similarity=0.9, difficulty=difficulty, matched_routing_id="id",
-        input_embedding=FAKE_EMBEDDING, current_threshold=0.8,
-    )
-    tier_rank = {"cheap": 0, "medium": 1, "frontier": 2}
-    assert tier_rank[high.tier] >= tier_rank[low.tier]
+    assert tuple(counts) == RUNG_NAMES
+    assert set(counts.values()) == {3}
 
 
 @pytest.mark.asyncio
-async def test_classify_propagates_embedding_errors():
-    """SPEC.md §5 contract: classify() must not swallow exceptions -- the
-    caller (circuit breaker layer) relies on this to trigger the
-    classifier-failure fallback."""
+async def test_classify_fetches_top_k_with_model_outcomes(monkeypatch):
+    from gatoway import router as router_module
+
+    class Pool:
+        async def fetch(self, query, vector, limit, model_ids):
+            assert "model_id" in query
+            assert "calculated_effectiveness" in query
+            assert "PARTITION BY model_id" in query
+            assert "calculated_effectiveness IS NOT NULL" in query
+            assert "model_neighbor_rank <= $2" in query
+            assert "model_id = ANY($3::text[])" in query
+            assert limit == NEIGHBORS_PER_MODEL
+            assert model_ids == ROUTABLE_MODEL_IDS
+            assert vector == FAKE_EMBEDDING
+            return [
+                {
+                    "routing_id": "one",
+                    "model_id": "openai/gemma-small",
+                    "calculated_effectiveness": 0.9,
+                    "calculated_difficulty": 0.1,
+                    "similarity": 0.9,
+                },
+                {
+                    "routing_id": "two",
+                    "model_id": "openai/gemma-small",
+                    "calculated_effectiveness": 0.8,
+                    "calculated_difficulty": 0.1,
+                    "similarity": 0.8,
+                },
+            ]
+
+    monkeypatch.setattr(router_module, "embed", lambda text: FAKE_EMBEDDING)
+    decision = await classify("hello", Pool())
+
+    assert decision.tier == "gemma-small"
+
+
+@pytest.mark.asyncio
+async def test_classify_propagates_embedding_errors(monkeypatch):
     from gatoway import router as router_module
 
     def boom(text: str):
         raise RuntimeError("embedding backend down")
 
-    router_module.embed = boom  # monkeypatch the module-level import
-    try:
-        with pytest.raises(RuntimeError, match="embedding backend down"):
-            await router_module.classify("hello", pool=None)
-    finally:
-        from gatoway.embeddings import embed as real_embed
-
-        router_module.embed = real_embed
+    monkeypatch.setattr(router_module, "embed", boom)
+    with pytest.raises(RuntimeError, match="embedding backend down"):
+        await router_module.classify("hello", pool=None)

@@ -8,7 +8,7 @@ whether a routed model can change a repository, survive executable grading,
 use failure feedback, and finish a multi-turn task.
 
 `gatoway.agentic_eval` adds that missing layer without mixing it into the
-lightweight router-vs-frontier report. Its conventions are intentionally close
+lightweight router-vs-highest-rung report. Its conventions are intentionally close
 to established coding-agent benchmarks:
 
 - [SWE-bench](https://github.com/SWE-bench/SWE-bench) evaluates patches for
@@ -29,8 +29,8 @@ For every task and every run:
    workspace. The model prompt contains the issue and editable source files,
    but not the tests or oracle.
 2. Route the issue through the normal Gatoway classifier. If PostgreSQL is not
-   available, use the task's held-out difficulty label through the same pure
-   decision function.
+   available, use an explicit eval-only approximation across the configured
+   rung order.
 3. Ask the selected NRP model for one unified diff.
 4. Reject patches that traverse directories, edit tests, create/delete files,
    rename paths, change modes, or touch anything outside the declared editable
@@ -44,7 +44,7 @@ For every task and every run:
    source snapshot to the conversation. Route and attempt another repair, up
    to the task's turn limit.
 7. Run the same task from a fresh workspace with every turn pinned to the
-   highest configured rung. This always-frontier control distinguishes routing
+   highest configured rung. This control distinguishes routing
    failures from model or output-protocol failures.
 
 The session threshold uses an expected length of one turn. A repair therefore
@@ -56,8 +56,8 @@ Execution failure also raises a separate monotonic minimum rung. The selected
 rung is the higher of the semantic routing result and this floor. An invalid
 diff, failed test suite, or exhaustion of both models in a rung advances the
 floor by one position in the configured rung order; it never hard-codes a
-`medium → frontier` branch and caps safely at the highest rung. Consequently,
-the low-confidence medium fallback remains cost-conscious on the first turn
+specific transition and caps safely at the highest rung. Consequently,
+the low-confidence `gpt-oss` fallback remains cost-conscious on the first turn
 but cannot trap a failing agent there.
 
 Qwen3 generation uses its non-thinking chat-template mode for this strict

@@ -1,5 +1,8 @@
 # Agentic Coding Eval Report
 
+> Historical result from the three-tier router. The eight-rung ladder was
+> configured afterward and has not yet been measured by a fresh live run.
+
 _Mode: live NRP model calls; routing: DB-backed pgvector; 3 run(s). Accepted patches were executed in a network-disabled, resource-limited Docker container. Grader image: `python:3.13-slim (sha256:7ce4b6dfe35e55397b7cda544f8a13f191b7ae28dc5aad71fe664dbc9bc2623f)`._
 
 **Router: solved 9/9 (100%); first-pass 9/9 (100%); mean turns 1.00; tier switches 0; tokens 6,690; provider latency 71.4s.**

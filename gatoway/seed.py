@@ -3,21 +3,19 @@ into `decision_history` before any live traffic (SPEC.md §8 cold-start).
 
 These rows exist purely so the router has *something* to match against on
 day one -- without them every early request falls below CONFIDENCE_FLOOR and
-gets routed to the fallback ("medium") tier regardless of actual difficulty
+gets routed to the fallback (`gpt-oss`) rung regardless of actual difficulty
 (see gatoway/router.py's decide()). No real LLM calls are made here: the
 "response" text per example is hand-templated, just enough to embed and
 produce a plausible response_embedding.
 
-Each example is hand-labeled with a `calculated_difficulty` matching the
-tier its prompt was designed to represent:
-    - cheap:    0.05 - 0.30  (simple factual Q&A)
-    - medium:   0.35 - 0.65  (moderate code fixes / short reasoning)
-    - frontier: 0.70 - 0.95  (multi-step planning / hard math / proofs)
+Each example is hand-labeled with a `calculated_difficulty`. The sorted seed
+set is spread evenly across the eight rungs (three observations each), so the
+wide router never treats a model with no evidence as proven.
 
 `calculated_effectiveness` is set high (0.85-0.98) for every seed row: these
 are meant to represent "this tier handled this kind of request well",
-establishing the initial cheap/medium/frontier clusters the real router will
-match against. `confidence` is set to a fixed synthetic 0.95 (SEED_CONFIDENCE)
+establishing the initial semantic clusters the real router will match against.
+`confidence` is set to a fixed synthetic 0.95 (SEED_CONFIDENCE)
 since there's no real nearest-neighbor match to report for a hand-authored
 row -- it just marks these as high-trust seed data, not a live decision.
 
@@ -40,7 +38,7 @@ import uuid
 
 from gatoway.db import close_pool, get_pool
 from gatoway.embeddings import embed
-from gatoway.providers import TIER_MODELS
+from gatoway.providers import MODEL_LADDER, TIER_MODELS
 
 SEED_CONFIDENCE = 0.95
 
@@ -173,26 +171,33 @@ FRONTIER_EXAMPLES: list[tuple[str, str, float]] = [
 ]
 
 
-def tier_for_difficulty(d: float) -> str:
-    if d <= 0.33:
-        return "cheap"
-    if d <= 0.66:
-        return "medium"
-    return "frontier"
+def rung_for_difficulty(difficulty: float) -> str:
+    """Map an ad-hoc label across all rungs for interactive seed growth."""
+    bounded = max(0.0, min(1.0, difficulty))
+    index = min(int(bounded * len(MODEL_LADDER)), len(MODEL_LADDER) - 1)
+    return MODEL_LADDER[index].name
+
+
+# Historical name retained for callers of the interactive labeling helper.
+tier_for_difficulty = rung_for_difficulty
 
 
 def build_seed_rows() -> list[dict]:
     """Pure helper (no DB/embedding calls) so the example bank composition
     is unit-testable if needed. Returns dicts without embeddings filled in.
     """
+    examples = sorted(
+        CHEAP_EXAMPLES + MEDIUM_EXAMPLES + FRONTIER_EXAMPLES,
+        key=lambda example: example[2],
+    )
     rows = []
-    for prompt, response, difficulty in CHEAP_EXAMPLES + MEDIUM_EXAMPLES + FRONTIER_EXAMPLES:
-        tier = tier_for_difficulty(difficulty)
+    for index, (prompt, response, difficulty) in enumerate(examples):
+        rung = MODEL_LADDER[index * len(MODEL_LADDER) // len(examples)].name
         rows.append(
             {
                 "prompt": prompt,
                 "response": response,
-                "tier": tier,
+                "tier": rung,
                 "difficulty": difficulty,
                 "effectiveness": round(random.uniform(0.85, 0.98), 3),
             }
@@ -229,9 +234,10 @@ async def _main() -> None:
     pool = await get_pool()
     try:
         count = await seed(pool)
-        print(f"Seeded {count} synthetic decision_history rows "
-              f"({len(CHEAP_EXAMPLES)} cheap, {len(MEDIUM_EXAMPLES)} medium, "
-              f"{len(FRONTIER_EXAMPLES)} frontier).")
+        print(
+            f"Seeded {count} synthetic decision_history rows "
+            f"across {len(MODEL_LADDER)} model rungs."
+        )
     finally:
         await close_pool()
 

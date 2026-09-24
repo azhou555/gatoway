@@ -45,7 +45,7 @@ def compute_quality_score(session) -> float:
     Finishing in fewer turns also scores 1.0 (capped -- we don't reward
     "too fast" beyond perfect). Needing 2x the expected turns scores 0.0.
     Linear in between. This is an explicit proxy for "the router picked a
-    tier good enough that the user didn't have to grind through many extra
+    rung good enough that the user didn't have to grind through many extra
     turns" -- not a measure of correctness or user sentiment (no such signal
     exists in the MVP's session data).
 

@@ -1,7 +1,8 @@
 # Design: Wide Model Ladder, Trustworthy Eval, and pgvector Task Decomposition
 
 **Date:** 2026-09-04
-**Status:** Implementation in progress — steps 1–3 complete; step 4 is next
+**Status:** Wide ladder implemented; 2026-09-08 live gate failed on bank
+density and model effectiveness
 **Supersedes parts of:** the architecture spec v0.1, `SPEC.md` today,
 `docs/spec.md` after step 1 — see §3 below
 
@@ -132,7 +133,8 @@ probe rounds on 2026-09-05 — full table, availability and latency in
 | `qwen3-4bit` | — | no longer advertised |
 | `qwen3-embedding` | — | not a chat model |
 
-**Ten working distinct chat models**, all at 3/3 availability. Building a
+**Ten working distinct chat endpoints** in the characterization run, all at
+3/3 availability. Building a
 ladder off the raw model list without deduplicating by served id would create
 phantom rungs.
 
@@ -140,7 +142,9 @@ Two corrections from the characterization run. `gemma-small-e4b` failed a
 single probe during the migration but returns 3/3 here — transient, and it is
 now the fastest entry in the table, so it is reinstated. `qwen3-4bit` has left
 NRP's inventory entirely (12 chat models are advertised, not 13); it is
-excluded because it no longer exists, not because it failed.
+excluded because it no longer exists, not because it failed. By implementation
+time, NRP's active-model catalog no longer listed `gemma-small-e4b`; the
+compatibility endpoint is therefore characterized but not routable.
 
 ### 4.2 Rungs
 
@@ -151,16 +155,16 @@ excluded because it no longer exists, not because it failed.
 | 2 | `gpt-oss` | 120B | 131K |
 | 3 | `qwen3` | 180B (6B active) | 1M |
 | 4 | `minimax-m2` | 230B | 205K |
-| 5 | `deepseek-v4-flash` | 304B | 1M |
-| 6 | `glm-5` | 753B | 1M |
+| 5 | `deepseek-v4-flash` | 304B | 1,048,576 |
+| 6 | `glm-5` | 753B | 1,048,576 |
 | 7 | `kimi` | 1T | 131K |
 | — | `gemma-small-e4b` | ~4B (unconfirmed) | unconfirmed |
 
-`gemma-small-e4b` is left **unnumbered** deliberately. It belongs below rung
-0 on size, but inserting it would shift every index and §5.3 names "Rung 2
-(`gpt-oss`, 120B)" by number. Its parameter figure is also the exact
-total-versus-effective ambiguity §4.4 flags, and re-costing is design step 4's
-job. Step 4 places it and confirms the figure.
+`gemma-small-e4b` remains **unnumbered**. Google's upstream card now resolves
+its size (4.5B effective / 8B including embeddings) and 128K context, but NRP's
+active-model matrix omits the endpoint. A production ladder must follow the
+managed service lifecycle rather than route traffic to an undocumented
+compatibility alias.
 
 27B and 31B share rung 1: they are not distinguishable as a cost band, so
 `gemma` serves as rung 1's circuit-breaker fallback rather than its own rung.
@@ -277,8 +281,8 @@ at its current 0.3.
 
 ### 5.3 Cold start and sparse rungs
 
-With eight rungs and a 24-row seed bank, most models start with zero
-observations. Two consequences:
+With eight rungs and a small seed bank, every model needs enough initial
+observations to satisfy `MIN_OBSERVATIONS`. Two consequences:
 
 1. **`gatoway/seed.py` must cover the ladder.** Seed rows carry a
    `model_id`; seeding needs to spread across rungs so the router has
@@ -427,11 +431,65 @@ for top-level requests.
 | 1 | Docs consolidation + spec v0.2 | Complete | — (no code) |
 | 2 | NRP characterization spike | Complete | rung table with latency + availability |
 | 3 | Eval rework | Complete | **Passed: 3 identical execution-scored runs** |
-| 4 | Wide ladder + router k-NN | Next | dead rungs pruned on evidence |
+| 4 | Wide ladder + router k-NN | Implemented; live gate failed | dead rungs pruned on evidence |
+| 4.5 | Bank densification + leakage fix | Planned | **≥2 rungs with evidence for most eval task clusters** |
 | 5 | Decomposition | Not started | **cost-per-passing-outcome beats one frontier call** |
 
 Steps 3 and 5 are real gates. If step 3 does not stabilize, step 4 does not
 start.
+
+### 8.1 Wide-ladder gate result
+
+The first isolated live run on 2026-09-08 used 24 rows (three assigned to
+each rung) and repeated the eight-task session three times. Proxy-cost savings
+were effectively unchanged at 40.0%, but the effectiveness delta deteriorated
+from -1.0 point under the three-tier router to -16.7 points. `minimax-m2`
+failed `code_fix` in all three runs and was inconsistent on `sql_query`, so
+the deterministic stability gate failed.
+
+Inspection of each task's five neighbors exposed the underlying routing
+problem: spreading three rows across each rung provides global coverage but
+not two observations per model inside each semantic neighborhood. Only the
+capital task found two same-rung confident observations. Most other decisions
+therefore took the cold-start rung or the highest single observed rung rather
+than a model that satisfied `MIN_OBSERVATIONS`.
+
+The follow-up changes retrieval to fetch up to five scored neighbors per
+configured model, preventing globally dense models and unscored requests from
+crowding out evidence for other rungs. A single high-rung observation can no
+longer promote a request: if no rung satisfies both `MIN_OBSERVATIONS` and the
+effectiveness bar, routing explicitly falls back to `gpt-oss`. The next live
+gate determines which task clusters still need denser evidence before
+dead-rung pruning is meaningful.
+
+**Correction (2026-09-24): the bank behind this gate leaked eval prompts.** An
+audit comparing `gatoway/seed.py`'s prompts against `eval.BENCHMARK_TASKS`
+found five of the eight eval prompts present in the seed bank, three of them
+character-for-character:
+
+| Eval task | Seed prompt | `SequenceMatcher` ratio |
+|---|---|---|
+| `capital_france` | identical | 1.00 |
+| `sql_query` | identical | 1.00 |
+| `hard_math_proof` | identical | 1.00 |
+| `code_fix` | differs by one word | 0.98 |
+| `multistep_planning` | reworded opening clause | ~0.9 |
+
+§7.3 and spec §7/§8 forbid exactly this, but both frame leakage as a
+*write-back* hazard, so `batch_job.py`'s `is_train_split` gate was the only
+defense and it never applies to hand-authored seed rows. The leak was
+introduced at seed time.
+
+Two consequences for the numbers above. The -16.7-point delta is not a clean
+measurement of learned routing: for five of eight tasks the router matched a
+row whose rung was assigned by hand at seed time, at similarity ≈ 1.0. And the
+one task that found two same-rung confident observations, `capital_france`, is
+one of the verbatim leaks — so the single positive data point in this analysis
+is the least trustworthy one. The density diagnosis still holds; its supporting
+evidence is weaker than it reads.
+
+Closed by `docs/plans/2026-09-24-bank-densification.md` Task 1, which adds a
+similarity guard over the seed corpus and rewrites the colliding prompts.
 
 **Each step gets its own implementation plan.** This document is the design
 for the pivot as a whole; it is deliberately too large to implement in one
@@ -440,7 +498,7 @@ each want their own, written against what the preceding gate actually
 produced — writing step 4's plan before step 3's numbers exist would be
 planning against assumptions this design exists to avoid.
 
-### 8.1 What the characterization spike covers
+### 8.2 What the characterization spike covers
 
 Mostly done during the NRP migration; what remains:
 
@@ -452,14 +510,10 @@ Mostly done during the NRP migration; what remains:
   and it does not discriminate across the param range.** §4.4's mitigation is
   unproven, not validated; it needs a tokens/sec probe over a longer
   generation. Design step 4 must not treat the cost model as latency-checked
-- [ ] Context window per rung — **not measured, carried forward.** The plan's
-  prose said the probe would report it; the probe it specified does not, and
-  NRP's `/v1/models` returns only `id`/`created`/`object`/`owned_by` — no
-  `max_model_len` or `context_length`. §4.2 makes context a *hard* routing
-  constraint, so a guessed figure would have the router accept requests a
-  model cannot hold. `gemma-small-e4b`'s cell is `unconfirmed` for that
-  reason. Source it from each model's upstream card before step 4 filters on
-  it
+- [x] Context window per rung — sourced from NRP's managed-model matrix on
+  2026-09-07 and encoded as a hard filter in `providers.MODEL_CONTEXT_TOKENS`.
+  The generic `/v1/models` response still lacks this metadata, so lifecycle
+  changes must update the table explicitly
 
 ---
 

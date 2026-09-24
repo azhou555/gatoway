@@ -5,8 +5,8 @@ actually improves routing quality (SPEC.md §3's classifier is only as good
 as its nearest-neighbor bank).
 
 For each prompt below, type a difficulty 0.0 (trivial) - 1.0 (very hard).
-Tier is derived automatically from that number (gatoway.seed.tier_for_difficulty,
-same cutoffs the router itself buckets on). Each label is embedded and
+Rung is derived automatically from that number across the configured ladder.
+Each label is embedded and
 inserted into decision_history immediately, so quitting early (Ctrl-C or 'q')
 keeps everything labeled so far -- nothing is lost or held in a batch.
 

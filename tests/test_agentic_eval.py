@@ -104,9 +104,8 @@ async def test_failed_attempt_chains_observation_and_promotes_tier():
             assert observation == ""
         else:
             assert "No unified diff" in observation
-        # Reproduce the low-confidence DB fallback: semantic routing remains
-        # medium even after the threshold rises.
-        return "medium"
+        # Reproduce a stable semantic route while the execution floor rises.
+        return "gpt-oss"
 
     result = await run_agentic_task(
         task,
@@ -117,7 +116,7 @@ async def test_failed_attempt_chains_observation_and_promotes_tier():
     )
 
     assert result.passed
-    assert result.tiers == ("medium", "frontier")
+    assert result.tiers == ("gpt-oss", "qwen3")
     assert result.tier_switches == 1
     assert len(calls) == 2
     assert "No unified diff" in calls[1][1][-1]["content"]
@@ -175,16 +174,16 @@ def test_docker_preflight_pins_runtime_to_inspected_image(monkeypatch, tmp_path)
 async def test_report_labels_dry_run_as_non_quality_result():
     task = next(task for task in load_tasks() if task.task_id == "ttl_cache")
 
-    async def medium_router(task, observation, pool, threshold):
+    async def fallback_router(task, observation, pool, threshold):
         del task, observation, pool, threshold
-        return "medium"
+        return "gpt-oss"
 
     result = await run_agentic_task(
         task,
         pool=None,
         grader=_trusted_local_grader,
         model_caller=scripted_repair_model,
-        route_turn=medium_router,
+        route_turn=fallback_router,
     )
     report = build_report(
         [AgenticEvalRun((result,))], dry_run=True, db_backed=False
@@ -192,7 +191,7 @@ async def test_report_labels_dry_run_as_non_quality_result():
 
     assert "scripted repair smoke test" in report
     assert "not a model-quality result" in report
-    assert "medium → frontier" in report
+    assert "gpt-oss → qwen3" in report
     assert "Production readiness gate: FAIL" in report
 
 
@@ -202,7 +201,7 @@ def test_readiness_gate_requires_three_reliable_runs_without_provider_exhaustion
     passing_attempt = AgenticAttempt(
         turn=1,
         threshold=0.5,
-        tier="medium",
+        tier="gpt-oss",
         model_id="openai/qwen3-small",
         cost_cents=0.1,
         input_tokens=10,
@@ -237,15 +236,15 @@ async def test_provider_failure_uses_configured_tier_fallback(monkeypatch):
         )
 
     monkeypatch.setattr("gatoway.agentic_eval.call_provider", fake_provider)
-    response = await call_agentic_model(task, "medium", [], 1)
+    response = await call_agentic_model(task, "qwen3-small", [], 1)
 
-    assert called == TIER_MODELS["medium"][:2]
+    assert called == TIER_MODELS["qwen3-small"][:2]
     assert response.content == "patch"
-    assert response.model_id == TIER_MODELS["medium"][1]
+    assert response.model_id == TIER_MODELS["qwen3-small"][1]
     assert response.provider_error is None
     assert response.finish_reason == "length"
     assert response.provider_failures == (
-        f"{TIER_MODELS['medium'][0]}: RuntimeError",
+        f"{TIER_MODELS['qwen3-small'][0]}: RuntimeError",
     )
     assert options[0]["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -260,9 +259,9 @@ async def test_exhausted_tier_fallback_becomes_observable_attempt(monkeypatch):
         del model, messages, kwargs
         raise RuntimeError("unavailable")
 
-    async def medium_router(task, observation, pool, threshold):
+    async def fallback_router(task, observation, pool, threshold):
         del task, observation, pool, threshold
-        return "medium"
+        return "gpt-oss"
 
     monkeypatch.setattr("gatoway.agentic_eval.call_provider", failed_provider)
     result = await run_agentic_task(
@@ -270,20 +269,20 @@ async def test_exhausted_tier_fallback_becomes_observable_attempt(monkeypatch):
         pool=None,
         grader=_trusted_local_grader,
         model_caller=call_agentic_model,
-        route_turn=medium_router,
+        route_turn=fallback_router,
     )
 
     assert not result.passed
     assert len(result.attempts) == task.max_turns
     assert all("Provider call failed" in attempt.observation for attempt in result.attempts)
-    assert result.tiers == ("medium", "frontier", "frontier")
+    assert result.tiers == ("gpt-oss", "qwen3", "minimax-m2")
     assert tuple(attempt.router_tier for attempt in result.attempts) == (
-        "medium", "medium", "medium"
+        "gpt-oss", "gpt-oss", "gpt-oss"
     )
     assert tuple(attempt.model_id for attempt in result.attempts) == (
-        "provider-error/medium",
-        "provider-error/frontier",
-        "provider-error/frontier",
+        "provider-error/gpt-oss",
+        "provider-error/qwen3",
+        "provider-error/minimax-m2",
     )
 
 
@@ -300,9 +299,9 @@ async def test_suite_adds_fresh_always_frontier_baseline_and_trajectories(tmp_pa
     )
 
     assert run.router_results[0].passed
-    assert run.router_results[0].tiers == ("medium", "frontier")
+    assert run.router_results[0].tiers == ("minimax-m2", "glm-5")
     assert run.baseline_results[0].passed
-    assert run.baseline_results[0].tiers == ("frontier", "frontier")
+    assert run.baseline_results[0].tiers == ("kimi", "kimi")
 
     trajectory_path = tmp_path / "router" / "ttl_cache.json"
     trajectory = json.loads(trajectory_path.read_text())
@@ -310,11 +309,11 @@ async def test_suite_adds_fresh_always_frontier_baseline_and_trajectories(tmp_pa
     assert trajectory["attempts"][0]["response_text"].startswith("I need")
     assert trajectory["attempts"][0]["finish_reason"] == "stop"
     assert trajectory["attempts"][0]["messages_sent"][0]["role"] == "system"
-    assert trajectory["attempts"][0]["selected_tier"] == "medium"
-    assert trajectory["attempts"][1]["router_tier"] == "frontier"
-    assert trajectory["attempts"][1]["minimum_tier"] == "frontier"
+    assert trajectory["attempts"][0]["selected_tier"] == "minimax-m2"
+    assert trajectory["attempts"][1]["router_tier"] == "glm-5"
+    assert trajectory["attempts"][1]["minimum_tier"] == "deepseek-v4-flash"
     assert (tmp_path / "always_frontier" / "ttl_cache.json").exists()
 
     report = build_report([run], dry_run=True, db_backed=False)
-    assert "Always-frontier baseline" in report
+    assert "Always-highest-rung baseline" in report
     assert "Router vs baseline" in report

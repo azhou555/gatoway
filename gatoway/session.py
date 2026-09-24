@@ -49,7 +49,7 @@ DEFAULT_EXPECTED_TURN_COUNT = 5
 
 DEFAULT_THRESHOLD = 0.5
 # Cap so a very long session can't push current_threshold past this and
-# force every remaining turn straight to "frontier".
+# force every remaining turn to demand impossible effectiveness.
 MAX_THRESHOLD = 0.9
 # Linear step per unit of turn_count/expected_turn_count ratio beyond 1.0.
 # E.g. expected_turn_count=5, turn_count=10 -> ratio=2.0 -> shift =

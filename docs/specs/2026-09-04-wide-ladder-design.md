@@ -488,8 +488,15 @@ one of the verbatim leaks — so the single positive data point in this analysis
 is the least trustworthy one. The density diagnosis still holds; its supporting
 evidence is weaker than it reads.
 
-Closed by `docs/plans/2026-09-24-bank-densification.md` Task 1, which adds a
-similarity guard over the seed corpus and rewrites the colliding prompts.
+Closed by `docs/plans/2026-09-24-bank-densification.md` Task 1:
+`tests/test_bank_leakage.py` now fails if any prompt in `seed.py` or
+`label_seed.py` is a normalized exact copy of an eval prompt or reaches a
+`SequenceMatcher` ratio of 0.85 against one, and the colliding prompts were
+rewritten as different instances of the same topic. The guard also flagged a
+sixth row the manual audit missed, `What is the capital of Japan?` at 0.88
+against `capital_france`: a different question, but one that differs from the
+eval prompt only in its final noun. It was reworded too. The gate numbers above
+still come from the leaky bank; they stay caveated until the gate is re-run.
 
 **Each step gets its own implementation plan.** This document is the design
 for the pivot as a whole; it is deliberately too large to implement in one

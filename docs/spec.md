@@ -213,7 +213,8 @@ stateDiagram-v2
   split gate never sees it. A 2026-09-24 audit found five of the eight eval
   prompts in `gatoway/seed.py`, three verbatim — see the correction in
   `docs/specs/2026-09-04-wide-ladder-design.md` §8.1. Any prompt written into
-  the bank must be checked for similarity against `eval.BENCHMARK_TASKS`.
+  the bank must be checked for similarity against `eval.BENCHMARK_TASKS`;
+  `tests/test_bank_leakage.py` enforces this for the seed prompt lists.
 - Primary reported metric: effectiveness/cost vs an "always highest-rung model"
   baseline, across a full simulated session (not just single requests) —
   this is what demonstrates the min-maxing story: e.g. "63% cost reduction,

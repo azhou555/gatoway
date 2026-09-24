@@ -82,7 +82,7 @@ introduced at seed time, not at write-back time.
 - Produces: `gatoway.bank_corpus.assert_no_eval_overlap(prompts)`, reused by
   Task 2's corpus test and Task 3's bootstrap entry point.
 
-- [ ] **Step 1: Write the failing test.** `tests/test_bank_leakage.py` collects
+- [x] **Step 1: Write the failing test.** `tests/test_bank_leakage.py` collects
   every prompt in `seed.CHEAP_EXAMPLES + MEDIUM_EXAMPLES + FRONTIER_EXAMPLES`
   and every prompt in `label_seed.CANDIDATE_PROMPTS`, and asserts that none
   exceeds a similarity threshold against any `BENCHMARK_TASKS` prompt. Use two
@@ -90,9 +90,9 @@ introduced at seed time, not at write-back time.
   `difflib.SequenceMatcher` ratio must stay under `0.85`. The failure message
   must name the colliding pair and its ratio, or a future regression is
   unreadable. Expect 5 failures on first run.
-- [ ] **Step 2: Verify the test fails for the right reason** — five named
+- [x] **Step 2: Verify the test fails for the right reason** — five named
   collisions, not an import error.
-- [ ] **Step 3: Rewrite the five seed prompts** so they stay in the same
+- [x] **Step 3: Rewrite the five seed prompts** so they stay in the same
   semantic neighborhood without restating the eval task. Same topic, different
   instance:
   - `What is the capital of France?` → `What is the capital of Portugal?`
@@ -102,14 +102,20 @@ introduced at seed time, not at write-back time.
   - `Prove that the square root of 2 is irrational.` → `Prove that there are
     infinitely many prime numbers.`
   - `Fix the off-by-one bug: for i in range(1, n): print(arr[i])` → `Fix the
-    off-by-one bug: for i in range(0, n+1): print(arr[i])`
+    off-by-one bug in this loop, which skips the last element: for i in
+    range(0, n - 1): total += arr[i]` *(the originally planned `range(0, n+1)`
+    variant still scored 0.94 — same template)*
+  - *Added during implementation:* `What is the capital of Japan?` (0.88) →
+    `Which city is Japan's capital?`; France → Portugal became `Which city is
+    the capital of Portugal?`, since the planned wording cleared the bar by
+    only 0.01.
   - `Plan a 3-step migration strategy from a monolith to microservices…` →
     `Plan a 3-step strategy for splitting a shared database between two teams,
     considering write contention.`
   Update each row's canned response text to match its new prompt.
-- [ ] **Step 4: Run the test — green.** Then `.venv/bin/pytest -q` for the full
+- [x] **Step 4: Run the test — green.** Then `.venv/bin/pytest -q` for the full
   suite.
-- [ ] **Step 5: Record the finding** in `docs/specs/2026-09-04-wide-ladder-design.md`
+- [x] **Step 5: Record the finding** in `docs/specs/2026-09-04-wide-ladder-design.md`
   §8.1 as a correction: the first wide-ladder gate ran against a bank that
   leaked 5 of 8 eval prompts, so its effectiveness delta is not a clean
   measurement of routing. State it plainly — it is evidence about the gate, not

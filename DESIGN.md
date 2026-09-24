@@ -1305,7 +1305,7 @@ Commits `31c8541` (first gate), `0201467` (fix), `47ee191` (re-gate).
 
 ## Phase 10: Leakage audit and bank densification (2026-09-24)
 
-Plan: `docs/plans/2026-09-24-bank-densification.md`. Not yet implemented.
+Plan: `docs/plans/2026-09-24-bank-densification.md`. Task 1 implemented; Tasks 2–4 pending.
 
 ### 10.1 Seed-time leakage found and recorded before fixing it
 
@@ -1327,8 +1327,18 @@ Plan: `docs/plans/2026-09-24-bank-densification.md`. Not yet implemented.
 - **Decision**: record it in the design doc, the spec and the README before
   fixing it, rather than quietly rewriting the prompts. The density diagnosis
   from Phase 9 still stands; its supporting evidence is weaker than it reads.
-- **Status**: *Open.* Closed by the plan's Task 1, which adds a similarity
-  guard over every prompt list that feeds the bank.
+- **Status**: *Closed at the source.* `tests/test_bank_leakage.py` checks
+  every prompt list that feeds the bank (`seed.py`, `label_seed.py`) against
+  the eval prompts, rejecting exact normalized copies and any
+  `SequenceMatcher` ratio ≥ 0.85. The guard lives in
+  `gatoway/bank_corpus.py` so the bootstrap corpus reuses it. It caught a
+  sixth near-copy the manual audit missed (`capital of Japan`, 0.88). The
+  already-recorded gate numbers stay caveated until the gate is re-run.
+- **Tradeoff**: a character ratio catches restatements, not paraphrases. On
+  short prompts it is dominated by the shared template, so it also flags
+  legitimate same-template neighbours; rewording those is cheap. An
+  embedding-similarity check at the router's own threshold is the upgrade
+  if a paraphrased leak ever gets through.
 
 ### 10.2 Densify by measuring, not by labeling
 
@@ -1389,9 +1399,9 @@ characterization probe, and the latency benchmark.
 1. **Bank density.** The router mostly falls back to `gpt-oss` because
    too few task clusters have two same-model scored observations. This is
    the main blocker for pruning rungs and for a passing ladder gate.
-1b. **Seed-time eval leakage** (§10.1). Five of eight eval prompts are in the
-   seed bank, three verbatim, so every recorded ladder-gate number carries a
-   caveat until the guard in the plan's Task 1 lands.
+1b. **Seed-time eval leakage** (§10.1). Fixed at the source and guarded by a
+   test, but every recorded ladder-gate number was measured on the leaky bank
+   and carries a caveat until the gate is re-run.
 2. **MoE cost ordering** (§2.2, §5.3). The parameter-count proxy has no
    independent validation.
 3. **Heuristic judge** (§6.3) on two of eight tasks.

@@ -143,8 +143,10 @@ Important notes:
   them verbatim, so for those tasks the router matched a hand-assigned rung at
   similarity ≈ 1.0 rather than learned evidence. The split rule in
   `batch_job.py` guards the write-back path and never saw it. Numbers above
-  should be read with that caveat until
-  `docs/plans/2026-09-24-bank-densification.md` Task 1 lands.
+  should be read with that caveat. The seed prompts are now fixed and
+  guarded by `tests/test_bank_leakage.py`, but these numbers predate the fix
+  and hold until the gate is re-run
+  (`docs/plans/2026-09-24-bank-densification.md` Task 4).
 - **These decisions came from an isolated live pgvector bank.** The three
   runs used real top-five neighbor queries against exactly the 24 wide-ladder
   seed rows;

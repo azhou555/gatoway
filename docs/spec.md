@@ -207,6 +207,13 @@ stateDiagram-v2
   synthetic tasks before any real traffic — this also solves the cold-start
   problem for the router without needing a separate heuristic scorer.
 - Held-out **eval-only** split is never written back to the bank.
+- **Seed rows are a leak path too.** "Train-only" constrains the *prompts*, not
+  just the write path: a hand-authored seed row that restates an eval prompt
+  puts the eval set in the bank at similarity ≈ 1.0, and `batch_job.py`'s
+  split gate never sees it. A 2026-09-24 audit found five of the eight eval
+  prompts in `gatoway/seed.py`, three verbatim — see the correction in
+  `docs/specs/2026-09-04-wide-ladder-design.md` §8.1. Any prompt written into
+  the bank must be checked for similarity against `eval.BENCHMARK_TASKS`.
 - Primary reported metric: effectiveness/cost vs an "always highest-rung model"
   baseline, across a full simulated session (not just single requests) —
   this is what demonstrates the min-maxing story: e.g. "63% cost reduction,

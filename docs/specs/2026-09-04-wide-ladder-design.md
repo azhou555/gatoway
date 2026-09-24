@@ -432,6 +432,7 @@ for top-level requests.
 | 2 | NRP characterization spike | Complete | rung table with latency + availability |
 | 3 | Eval rework | Complete | **Passed: 3 identical execution-scored runs** |
 | 4 | Wide ladder + router k-NN | Implemented; live gate failed | dead rungs pruned on evidence |
+| 4.5 | Bank densification + leakage fix | Planned | **≥2 rungs with evidence for most eval task clusters** |
 | 5 | Decomposition | Not started | **cost-per-passing-outcome beats one frontier call** |
 
 Steps 3 and 5 are real gates. If step 3 does not stabilize, step 4 does not
@@ -460,6 +461,35 @@ longer promote a request: if no rung satisfies both `MIN_OBSERVATIONS` and the
 effectiveness bar, routing explicitly falls back to `gpt-oss`. The next live
 gate determines which task clusters still need denser evidence before
 dead-rung pruning is meaningful.
+
+**Correction (2026-09-24): the bank behind this gate leaked eval prompts.** An
+audit comparing `gatoway/seed.py`'s prompts against `eval.BENCHMARK_TASKS`
+found five of the eight eval prompts present in the seed bank, three of them
+character-for-character:
+
+| Eval task | Seed prompt | `SequenceMatcher` ratio |
+|---|---|---|
+| `capital_france` | identical | 1.00 |
+| `sql_query` | identical | 1.00 |
+| `hard_math_proof` | identical | 1.00 |
+| `code_fix` | differs by one word | 0.98 |
+| `multistep_planning` | reworded opening clause | ~0.9 |
+
+§7.3 and spec §7/§8 forbid exactly this, but both frame leakage as a
+*write-back* hazard, so `batch_job.py`'s `is_train_split` gate was the only
+defense and it never applies to hand-authored seed rows. The leak was
+introduced at seed time.
+
+Two consequences for the numbers above. The -16.7-point delta is not a clean
+measurement of learned routing: for five of eight tasks the router matched a
+row whose rung was assigned by hand at seed time, at similarity ≈ 1.0. And the
+one task that found two same-rung confident observations, `capital_france`, is
+one of the verbatim leaks — so the single positive data point in this analysis
+is the least trustworthy one. The density diagnosis still holds; its supporting
+evidence is weaker than it reads.
+
+Closed by `docs/plans/2026-09-24-bank-densification.md` Task 1, which adds a
+similarity guard over the seed corpus and rewrites the colliding prompts.
 
 **Each step gets its own implementation plan.** This document is the design
 for the pivot as a whole; it is deliberately too large to implement in one

@@ -1378,10 +1378,13 @@ Plan: `docs/plans/2026-09-24-bank-densification.md`. Tasks 1–2 implemented; Ta
   output, its own tables and its own SQL function allowlist. The allowlist
   stays per fixture so widening it for `COUNT`/`SUM` cannot loosen eval
   scoring.
-- **Guard**: `tests/test_bank_corpus.py` asserts the eval `code_fix` and
-  `sql_query` reference answers score 0.0 on every train execution prompt,
-  and that every train prompt's own reference answer scores 1.0 — so an
-  unanswerable prompt is caught before any model call is spent on it.
+- **Guard**: `tests/test_bank_corpus.py` asserts every train prompt's own
+  reference answer scores 1.0 — so an unanswerable prompt is caught before any
+  model call is spent on it — and that the eval `code_fix` answer scores 0.0
+  on every train loop prompt. The matching SQL assertion is weaker than it
+  looks: the eval query fails on a missing `employees` table regardless, so it
+  proves nothing. The SQL protection is the per-prompt tables and questions
+  themselves, plus the character guard.
 - **Tradeoff**: data, not new scorers — the sandboxed grammar is unchanged,
   so train Python prompts steer answers toward editing `range()` (slices and
   `reversed` are rejected by the grammar). A correct answer outside that

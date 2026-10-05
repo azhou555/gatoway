@@ -63,13 +63,13 @@ Two takeaways:
 
 ## 3. Recommendations
 
-**Do first — cheapest real win, independent of any flip:** add response
-normalization (strip code fences / extract JSON) in the gateway output path.
-Raw instruction-following still matters, but a fenced-but-correct answer should
-not be served as-is. This helps the **current** router most (gemma-small: 51
-routes under current vs 3 under strict) and recovers ~6 points on the json_exact
-holdout immediately. This better answers the original "next improvement"
-question than flipping strict does.
+**Done — serving-path output normalization.** `app.py` now unwraps a response
+that is a single code fence around valid JSON (`unwrap_fenced_json`), returning
+bare JSON to the caller; prose and non-JSON code blocks are left untouched.
+This is a caller-facing fix (gemma-small — 51/144 routes under the current
+router — fences ~25% of its JSON). Note it does not by itself move the eval
+numbers: the ~6-point json_exact recovery comes from the fence-tolerant scorer
+plus a bank re-bootstrap (below), not from serving normalization.
 
 **On the flip (`GATOWAY_STRICT_ROUTING`):**
 - The gate is a single boolean. Flipping it enables **all five** downgrades,
@@ -84,7 +84,12 @@ question than flipping strict does.
 
 ## 4. Follow-ups
 
-- Make `score_json` fence-tolerant; as written it conflates format with
-  correctness and mis-scores any fence-wrapping model across all json suites.
+- Re-bootstrap the bank with the fence-normalized scorer so routing stops
+  under-crediting fence-wrapping models; the scorer change alone does not
+  rewrite existing `calculated_effectiveness` rows.
 - Densify the bank's coding coverage so the gpt-oss clusters can be probed and
   generalize; today they are too narrow to validate.
+
+Done in this cycle: fence-tolerant scoring reported alongside the strict score
+(`score_json_normalized`), and serving-path unwrapping of fenced JSON
+(`app.unwrap_fenced_json`).

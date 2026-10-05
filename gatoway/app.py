@@ -22,7 +22,9 @@ non-goals and TASKS.md's MVP cut list.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -89,6 +91,31 @@ def _last_user_text(messages: list[ChatMessage]) -> str:
             return msg.content
     # Fall back to the last message of any role if no "user" turn is present.
     return messages[-1].content
+
+
+# A whole response that is a single fenced block, optionally tagged ```json.
+_WHOLE_FENCE = re.compile(r"^```[^\n`]*\n(.*)\n```$", re.DOTALL)
+
+
+def unwrap_fenced_json(content: str) -> str:
+    """Unwrap a response that is one code fence around valid JSON.
+
+    Some models (notably gemma-small) return correct JSON wrapped in a
+    ```json ... ``` block, which a JSON-expecting caller then has to strip.
+    Unwrap only when the whole response is a single fence AND its inner text
+    parses as JSON; prose, mixed text, and non-JSON code blocks (e.g. a
+    ```python answer) are returned unchanged, so a legitimately fenced answer
+    is never corrupted.
+    """
+    match = _WHOLE_FENCE.match(content.strip())
+    if not match:
+        return content
+    inner = match.group(1).strip()
+    try:
+        json.loads(inner)
+    except ValueError:
+        return content
+    return inner
 
 
 def _error_response(status_code: int, message: str, error_type: str) -> JSONResponse:
@@ -165,7 +192,8 @@ async def chat_completions(request: ChatCompletionRequest) -> JSONResponse:
         return _error_response(503, provider_error or "provider call failed", "provider_error")
 
     routing_id = uuid.uuid4()
-    response_embedding = embed(response.content)
+    content = unwrap_fenced_json(response.content)
+    response_embedding = embed(content)
     await pool.execute(
         """
         INSERT INTO decision_history
@@ -191,7 +219,7 @@ async def chat_completions(request: ChatCompletionRequest) -> JSONResponse:
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": response.content},
+                "message": {"role": "assistant", "content": content},
                 "finish_reason": "stop",
             }
         ],

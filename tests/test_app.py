@@ -76,6 +76,45 @@ def make_provider_response(model_id="openai/gpt-oss"):
     )
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ('```json\n{"result": [90, 70]}\n```', '{"result": [90, 70]}'),  # fenced JSON -> bare
+    ('```\n{"a": 1}\n```', '{"a": 1}'),                               # untagged fence, JSON inside
+    ('{"a": 1}', '{"a": 1}'),                                         # already bare -> unchanged
+    ('```python\ndef f():\n    return 1\n```', '```python\ndef f():\n    return 1\n```'),  # code block kept
+    ('The answer is 42.', 'The answer is 42.'),                       # prose kept
+    ('here: ```json\n{"a":1}\n``` ok', 'here: ```json\n{"a":1}\n``` ok'),  # not whole-response
+])
+def test_unwrap_fenced_json(raw, expected):
+    assert app_module.unwrap_fenced_json(raw) == expected
+
+
+def test_fenced_json_response_is_unwrapped_for_caller(monkeypatch):
+    decision = RoutingDecision(
+        tier="gemma-small", confidence=0.9, low_confidence=False,
+        calculated_difficulty=0.1, matched_routing_id=uuid.uuid4(),
+        input_embedding=FAKE_EMBEDDING,
+    )
+
+    async def fake_classify(text, pool, current_threshold):
+        return decision
+
+    async def fake_breaker_call(self, tier, messages, **kwargs):
+        resp = make_provider_response("openai/gemma-small")
+        resp.content = '```json\n{"result": [90, 70]}\n```'
+        return resp
+
+    monkeypatch.setattr(app_module, "classify", fake_classify)
+    monkeypatch.setattr(app_module.CircuitBreaker, "call", fake_breaker_call)
+    monkeypatch.setattr(app_module, "breaker", app_module.CircuitBreaker())
+
+    client = TestClient(app_module.app)
+    resp = client.post("/v1/chat/completions",
+                       json={"messages": [{"role": "user", "content": "top two salaries"}]})
+
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == '{"result": [90, 70]}'
+
+
 def test_happy_path_returns_200_with_gatoway_metadata(monkeypatch):
     decision = RoutingDecision(
         tier="gemma-small",

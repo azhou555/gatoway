@@ -22,5 +22,6 @@ def test_classified_docs_all_exist():
         "INDEX lists a file that is not present under docs/")
 
 
-def test_render_is_deterministic():
-    assert idx.render() == idx.render()
+def test_index_file_matches_render():
+    assert (idx.DOCS_DIR / "INDEX.md").read_text() == idx.render(), (
+        "docs/INDEX.md is stale; run: .venv/bin/python scripts/build_docs_index.py")

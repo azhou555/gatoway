@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from gatoway.breadth_tasks import load_cases, score_json
+from gatoway.breadth_tasks import load_cases, score_json, score_json_normalized, strip_json_fence
 from gatoway.eval import benchmark_tasks, run_eval_repeated, build_report, stability_gate
 from gatoway.bank_corpus import TRAIN_PROMPTS, assert_no_eval_overlap, score
 
@@ -14,6 +14,32 @@ async def test_gold_and_wrong_answers(case):
     assert await score(task, json.dumps(case['answer']), 'unused') == 1
     for wrong in ['null', 'true', '{}', '[]', 'I cannot answer.', '```json\n'+json.dumps(case['answer'])+'\n```']:
         assert await score(task, wrong, 'unused') == 0
+
+
+def test_fence_normalized_scoring_separates_format_from_capability():
+    expected = {'result': [2000, 1500]}
+    bare = '{"result": [2000, 1500]}'
+    fenced = '```json\n{"result": [2000, 1500]}\n```'
+    fenced_wrong = '```json\n{"result": [1500, 2000]}\n```'
+    # bare correct: both agree
+    assert score_json(bare, expected) == 1.0
+    assert score_json_normalized(bare, expected) == 1.0
+    # fenced correct: raw misses (instruction-following), normalized recovers
+    assert score_json(fenced, expected) == 0.0
+    assert score_json_normalized(fenced, expected) == 1.0
+    # fenced wrong: neither passes
+    assert score_json(fenced_wrong, expected) == 0.0
+    assert score_json_normalized(fenced_wrong, expected) == 0.0
+    # prose is not JSON under either
+    assert score_json_normalized('The answer is 2000 and 1500.', expected) == 0.0
+
+
+def test_strip_json_fence_only_whole_block():
+    assert strip_json_fence('```json\n{"a":1}\n```') == '{"a":1}'
+    assert strip_json_fence('```\n{"a":1}\n```') == '{"a":1}'
+    # not a whole-response fence -> unchanged (never corrupts a bare or mixed body)
+    assert strip_json_fence('{"a":1}') == '{"a":1}'
+    assert strip_json_fence('see: ```json\n{"a":1}\n``` done') == 'see: ```json\n{"a":1}\n``` done'
 
 
 @pytest.mark.parametrize('response,expected', [

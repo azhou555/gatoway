@@ -6,51 +6,53 @@
 
 ## All
 
-| Policy | Scored pairs | Quality | Delta vs Kimi (points) | Exploratory 95% interval | Estimated USD | Savings | Length finishes |
-|---|---:|---:|---:|---|---:|---:|---:|
-| current | 232 (2 missing) | 70.32% | -28.81 | [-38.40, -19.27] | $0.215746 | 2.0% | 3 |
-| frontier_fallback | 232 (2 missing) | 73.77% | -25.37 | [-34.83, -16.24] | $0.247422 | -12.4% | 3 |
-| paired_quality | 232 (2 missing) | 79.63% | -19.50 | [-28.42, -10.58] | $0.255350 | -16.0% | 0 |
-| price_order | 232 (2 missing) | 73.17% | -25.97 | [-35.68, -16.35] | $0.086354 | 60.8% | 0 |
-| strict_evidence | 232 (2 missing) | 79.74% | -19.40 | [-28.21, -10.26] | $0.212217 | 3.6% | 0 |
-| paired_price | 232 (2 missing) | 79.74% | -19.40 | [-28.21, -10.26] | $0.212217 | 3.6% | 0 |
-| always_kimi | 232 (2 missing) | 99.14% | +0.00 | [+0.00, +0.00] | $0.220176 | 0.0% | 0 |
+| Policy | Scored pairs | Quality (raw) | Delta raw (pts) | Exploratory 95% interval | Quality (fence-norm) | Delta norm (pts) | Estimated USD | Savings | Length finishes |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---:|
+| current | 232 (2 missing) | 70.32% | -28.81 | [-38.40, -19.27] | 93.60% | -5.97 | $0.215746 | 2.0% | 3 |
+| frontier_fallback | 232 (2 missing) | 73.77% | -25.37 | [-34.83, -16.24] | 95.75% | -3.81 | $0.247422 | -12.4% | 3 |
+| paired_quality | 232 (2 missing) | 79.63% | -19.50 | [-28.42, -10.58] | 99.46% | -0.11 | $0.255350 | -16.0% | 0 |
+| price_order | 232 (2 missing) | 73.17% | -25.97 | [-35.68, -16.35] | 95.15% | -4.42 | $0.086354 | 60.8% | 0 |
+| strict_evidence | 232 (2 missing) | 79.74% | -19.40 | [-28.21, -10.26] | 99.57% | +0.00 | $0.212217 | 3.6% | 0 |
+| paired_price | 232 (2 missing) | 79.74% | -19.40 | [-28.21, -10.26] | 99.57% | +0.00 | $0.212217 | 3.6% | 0 |
+| always_kimi | 232 (2 missing) | 99.14% | +0.00 | [+0.00, +0.00] | 99.57% | +0.00 | $0.220176 | 0.0% | 0 |
 
 ## Existing
 
-| Policy | Scored pairs | Quality | Delta vs Kimi (points) | Exploratory 95% interval | Estimated USD | Savings | Length finishes |
-|---|---:|---:|---:|---|---:|---:|---:|
-| current | 94 (2 missing) | 89.52% | -10.48 | [-20.26, -1.04] | $0.173634 | -7.7% | 3 |
-| frontier_fallback | 94 (2 missing) | 92.71% | -7.29 | [-16.25, -0.26] | $0.189509 | -17.6% | 3 |
-| paired_quality | 94 (2 missing) | 99.73% | -0.27 | [-0.78, +0.00] | $0.192738 | -19.6% | 0 |
-| price_order | 94 (2 missing) | 93.35% | -6.65 | [-15.89, +0.00] | $0.046196 | 71.3% | 0 |
-| strict_evidence | 94 (2 missing) | 100.00% | +0.00 | [+0.00, +0.00] | $0.149678 | 7.1% | 0 |
-| paired_price | 94 (2 missing) | 100.00% | +0.00 | [+0.00, +0.00] | $0.149678 | 7.1% | 0 |
-| always_kimi | 94 (2 missing) | 100.00% | +0.00 | [+0.00, +0.00] | $0.161181 | 0.0% | 0 |
+| Policy | Scored pairs | Quality (raw) | Delta raw (pts) | Exploratory 95% interval | Quality (fence-norm) | Delta norm (pts) | Estimated USD | Savings | Length finishes |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---:|
+| current | 94 (2 missing) | 89.52% | -10.48 | [-20.26, -1.04] | 89.52% | -10.48 | $0.173634 | -7.7% | 3 |
+| frontier_fallback | 94 (2 missing) | 92.71% | -7.29 | [-16.25, -0.26] | 92.71% | -7.29 | $0.189509 | -17.6% | 3 |
+| paired_quality | 94 (2 missing) | 99.73% | -0.27 | [-0.78, +0.00] | 99.73% | -0.27 | $0.192738 | -19.6% | 0 |
+| price_order | 94 (2 missing) | 93.35% | -6.65 | [-15.89, +0.00] | 93.35% | -6.65 | $0.046196 | 71.3% | 0 |
+| strict_evidence | 94 (2 missing) | 100.00% | +0.00 | [+0.00, +0.00] | 100.00% | +0.00 | $0.149678 | 7.1% | 0 |
+| paired_price | 94 (2 missing) | 100.00% | +0.00 | [+0.00, +0.00] | 100.00% | +0.00 | $0.149678 | 7.1% | 0 |
+| always_kimi | 94 (2 missing) | 100.00% | +0.00 | [+0.00, +0.00] | 100.00% | +0.00 | $0.161181 | 0.0% | 0 |
 
 ## Holdout
 
-| Policy | Scored pairs | Quality | Delta vs Kimi (points) | Exploratory 95% interval | Estimated USD | Savings | Length finishes |
-|---|---:|---:|---:|---|---:|---:|---:|
-| current | 48 (0 missing) | 70.83% | -25.00 | [-43.75, -8.33] | $0.001661 | 92.1% | 0 |
-| frontier_fallback | 48 (0 missing) | 81.25% | -14.58 | [-31.25, +0.00] | $0.017462 | 17.5% | 0 |
-| paired_quality | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | $0.022162 | -4.7% | 0 |
-| price_order | 48 (0 missing) | 77.08% | -18.75 | [-39.58, -2.08] | $0.001685 | 92.0% | 0 |
-| strict_evidence | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | $0.021160 | 0.0% | 0 |
-| paired_price | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | $0.021160 | 0.0% | 0 |
-| always_kimi | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | $0.021160 | 0.0% | 0 |
+| Policy | Scored pairs | Quality (raw) | Delta raw (pts) | Exploratory 95% interval | Quality (fence-norm) | Delta norm (pts) | Estimated USD | Savings | Length finishes |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---:|
+| current | 48 (0 missing) | 70.83% | -25.00 | [-43.75, -8.33] | 89.58% | -8.33 | $0.001661 | 92.1% | 0 |
+| frontier_fallback | 48 (0 missing) | 81.25% | -14.58 | [-31.25, +0.00] | 93.75% | -4.17 | $0.017462 | 17.5% | 0 |
+| paired_quality | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | 97.92% | +0.00 | $0.022162 | -4.7% | 0 |
+| price_order | 48 (0 missing) | 77.08% | -18.75 | [-39.58, -2.08] | 89.58% | -8.33 | $0.001685 | 92.0% | 0 |
+| strict_evidence | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | 97.92% | +0.00 | $0.021160 | 0.0% | 0 |
+| paired_price | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | 97.92% | +0.00 | $0.021160 | 0.0% | 0 |
+| always_kimi | 48 (0 missing) | 95.83% | +0.00 | [+0.00, +0.00] | 97.92% | +0.00 | $0.021160 | 0.0% | 0 |
 
 ## Probe
 
-| Policy | Scored pairs | Quality | Delta vs Kimi (points) | Exploratory 95% interval | Estimated USD | Savings | Length finishes |
-|---|---:|---:|---:|---|---:|---:|---:|
-| current | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | $0.040451 | -6.9% | 0 |
-| frontier_fallback | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | $0.040451 | -6.9% | 0 |
-| paired_quality | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | $0.040451 | -6.9% | 0 |
-| price_order | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | $0.038472 | -1.7% | 0 |
-| strict_evidence | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | $0.041379 | -9.4% | 0 |
-| paired_price | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | $0.041379 | -9.4% | 0 |
-| always_kimi | 90 (0 missing) | 100.00% | +0.00 | [+0.00, +0.00] | $0.037835 | 0.0% | 0 |
+| Policy | Scored pairs | Quality (raw) | Delta raw (pts) | Exploratory 95% interval | Quality (fence-norm) | Delta norm (pts) | Estimated USD | Savings | Length finishes |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---:|
+| current | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | 100.00% | +0.00 | $0.040451 | -6.9% | 0 |
+| frontier_fallback | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | 100.00% | +0.00 | $0.040451 | -6.9% | 0 |
+| paired_quality | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | 100.00% | +0.00 | $0.040451 | -6.9% | 0 |
+| price_order | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | 100.00% | +0.00 | $0.038472 | -1.7% | 0 |
+| strict_evidence | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | 100.00% | +0.00 | $0.041379 | -9.4% | 0 |
+| paired_price | 90 (0 missing) | 50.00% | -50.00 | [-66.67, -33.33] | 100.00% | +0.00 | $0.041379 | -9.4% | 0 |
+| always_kimi | 90 (0 missing) | 100.00% | +0.00 | [+0.00, +0.00] | 100.00% | +0.00 | $0.037835 | 0.0% | 0 |
+
+Raw = strict whole-response JSON (counts a code fence as a miss, i.e. instruction-following). Fence-norm = same scoring after removing a single surrounding code fence (capability). They differ only on json_exact suites.
 
 ## Category quality deltas
 
@@ -64,6 +66,20 @@ Points relative to Kimi; negative means worse.
 | price_order | +0.00 | -8.33 | -29.17 | -1.04 | -100.00 | +0.00 | -12.50 | -12.50 |
 | strict_evidence | +0.00 | +0.00 | +0.00 | +0.00 | -100.00 | +0.00 | +0.00 | +0.00 |
 | paired_price | +0.00 | +0.00 | +0.00 | +0.00 | -100.00 | +0.00 | +0.00 | +0.00 |
+| always_kimi | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 |
+
+## Category quality deltas (fence-normalized)
+
+Same as above after removing a single surrounding code fence; differs only on json_exact suites.
+
+| Policy | coding | holdout_reasoning | holdout_structured | original | probe_gemma | probe_glm5 | reasoning | structured |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| current | -16.36 | -8.33 | -8.33 | -1.04 | +0.00 | +0.00 | -12.50 | -12.50 |
+| frontier_fallback | -16.36 | -8.33 | +0.00 | -1.04 | +0.00 | +0.00 | -12.50 | +0.00 |
+| paired_quality | +0.00 | +0.00 | +0.00 | -1.04 | +0.00 | +0.00 | +0.00 | +0.00 |
+| price_order | +0.00 | -8.33 | -8.33 | -1.04 | +0.00 | +0.00 | -12.50 | -12.50 |
+| strict_evidence | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 |
+| paired_price | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 |
 | always_kimi | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 | +0.00 |
 
 ## Routing mix

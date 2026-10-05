@@ -21,7 +21,7 @@ Status: **current** | **generated** (regenerable, see command) | **superseded** 
 | [policy_results.md](policy_results.md) | current | Seven-policy screening, 342/342 outcomes scored. |
 | [policy_comparison.md](policy_comparison.md) | current | Protocol and limitations for policy_results.md (hand-written). |
 | [downgrade_probe_results.md](downgrade_probe_results.md) | current | Fresh-task validation of the strict_evidence downgrades; fence-normalization re-grading (hand-written verdict). |
-| [policy_results_probe.md](policy_results_probe.md) | generated | Raw probe-run output; superseded by downgrade_probe_results.md (its probe-group scores are pre-fence-normalization). |
+| [policy_results_probe.md](policy_results_probe.md) | generated | Raw probe-run output (raw + fence-normalized columns); interpreted in downgrade_probe_results.md. |
 
 ## Cost
 

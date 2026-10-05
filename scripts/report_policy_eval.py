@@ -15,6 +15,9 @@ args=parser.parse_args()
 manifest=json.loads((args.directory/'manifest.json').read_text())
 state=json.loads((args.directory/'outcomes.json').read_text())
 summary=summarize(manifest,state)
+# Only tasks present in this run's manifest; tasks() may define more than an
+# older checkpoint scored (e.g. probes added after the run).
+run_tasks=[t for t in tasks() if t.task_id in manifest['decisions']]
 expected={(run,task,v['tier']) for run in range(1,manifest['runs']+1)
           for task,d in manifest['decisions'].items() for v in d['policies'].values()}
 completed=sum('score' in v for v in state.values())
@@ -22,20 +25,30 @@ lines=['# Policy screening results','',f'**Status: {completed}/{len(expected)} u
        '', '[Protocol and limitations](policy_comparison.md). Prices include the unverified Gemma rate assumption. '
        'All policies share the same generation controls and matched answers. No production policy was changed.', '']
 for group,policies in summary.items():
+    if not any('n' in r for r in policies.values()): continue
     lines += ['## '+group.title(),'',
-              '| Policy | Scored pairs | Quality | Delta vs Kimi (points) | Exploratory 95% interval | Estimated USD | Savings | Length finishes |',
-              '|---|---:|---:|---:|---|---:|---:|---:|']
+              '| Policy | Scored pairs | Quality (raw) | Delta raw (pts) | Exploratory 95% interval | Quality (fence-norm) | Delta norm (pts) | Estimated USD | Savings | Length finishes |',
+              '|---|---:|---:|---:|---|---:|---:|---:|---:|---:|']
     for name,r in policies.items():
         if 'n' not in r: continue
         lo,hi=r['delta_ci95_points']
-        lines.append(f"| {name} | {r['n']} ({r['missing']} missing) | {100*r['quality']:.2f}% | {r['quality_delta_points']:+.2f} | [{lo:+.2f}, {hi:+.2f}] | ${r['estimated_usd']:.6f} | {r['savings_percent']:.1f}% | {r['length_finishes']} |")
+        lines.append(f"| {name} | {r['n']} ({r['missing']} missing) | {100*r['quality']:.2f}% | {r['quality_delta_points']:+.2f} | [{lo:+.2f}, {hi:+.2f}] | {100*r['quality_normalized']:.2f}% | {r['quality_delta_normalized_points']:+.2f} | ${r['estimated_usd']:.6f} | {r['savings_percent']:.1f}% | {r['length_finishes']} |")
     lines.append('')
+lines += ['Raw = strict whole-response JSON (counts a code fence as a miss, i.e. instruction-following). '
+          'Fence-norm = same scoring after removing a single surrounding code fence (capability). '
+          'They differ only on json_exact suites.', '']
 lines += ['## Category quality deltas','', 'Points relative to Kimi; negative means worse.','',
           '| Policy | '+ ' | '.join(sorted({d['suite'] for d in manifest['decisions'].values()}))+' |',
           '|---|'+'---:|'*len({d['suite'] for d in manifest['decisions'].values()})]
 for name,r in summary['all'].items():
     if 'n' not in r: continue
     lines.append('| '+name+' | '+' | '.join(f"{r['suite_delta_points'].get(s,0):+.2f}" for s in sorted({d['suite'] for d in manifest['decisions'].values()}))+' |')
+lines += ['', '## Category quality deltas (fence-normalized)','', 'Same as above after removing a single surrounding code fence; differs only on json_exact suites.','',
+          '| Policy | '+ ' | '.join(sorted({d['suite'] for d in manifest['decisions'].values()}))+' |',
+          '|---|'+'---:|'*len({d['suite'] for d in manifest['decisions'].values()})]
+for name,r in summary['all'].items():
+    if 'n' not in r: continue
+    lines.append('| '+name+' | '+' | '.join(f"{r['suite_delta_normalized_points'].get(s,0):+.2f}" for s in sorted({d['suite'] for d in manifest['decisions'].values()}))+' |')
 lines += ['', '## Routing mix', '', '| Policy | Model counts across task/repetitions |','|---|---|']
 for name,r in summary['all'].items():
     lines.append('| '+name+' | '+str(r.get('model_counts',{}))+' |')
@@ -44,7 +57,7 @@ lines += ['', '## Objective full passes and repeatability', '',
 for name in summary['all']:
     passed = total = 0
     unstable = []
-    for task in tasks():
+    for task in run_tasks:
         if task.scoring_method == 'llm_judge': continue
         tier = manifest['decisions'][task.task_id]['policies'][name]['tier']
         scores = [state.get(f'{run}/{task.task_id}/{tier}', {}).get('score') for run in range(1, manifest['runs']+1)]
@@ -58,7 +71,7 @@ lines += ['', '## Objective task failures and repeatability', '',
           'Full pass means score 1.0. A stable failure is still a failure. Open-ended rubric tasks are excluded from this table.', '',
           '| Policy | Task | Scores by repetition |', '|---|---|---|']
 for name in summary['all']:
-    for task in tasks():
+    for task in run_tasks:
         if task.scoring_method=='llm_judge': continue
         tier=manifest['decisions'][task.task_id]['policies'][name]['tier']
         scores=[state.get(f'{run}/{task.task_id}/{tier}',{}).get('score') for run in range(1,manifest['runs']+1)]

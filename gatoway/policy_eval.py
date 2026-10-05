@@ -16,6 +16,7 @@ import time
 from gatoway.bank_corpus import TRAIN_PROMPTS, score
 from gatoway.bootstrap_bank import isolated_pool, row_id, save_state
 from gatoway.embeddings import embed
+from gatoway.breadth_tasks import score_json_normalized
 from gatoway.eval import benchmark_tasks, BenchmarkTask
 from gatoway.judge import judge
 from gatoway.providers import call_provider, RUNG_BY_NAME
@@ -83,12 +84,21 @@ async def prepare(args):
 
 def summarize(manifest, state):
     reports = {}
+    # Fence-normalized scores (format-tolerant) reported alongside the strict
+    # scores. Only json_exact tasks can differ; others reuse the stored score.
+    json_expected = {t.task_id: t.expected_json for t in tasks()
+                     if t.scoring_method == 'json_exact'}
+    def normalized(task, outcome):
+        if task in json_expected:
+            return score_json_normalized(outcome['response']['content'], json_expected[task])
+        return outcome['score']
     for name, suites in [('all', None), ('existing', {'original','coding','structured','reasoning'}),
                           ('holdout', {'holdout_structured','holdout_reasoning'}),
                           ('probe', {'probe_glm5','probe_gemma'})]:
         group = {}
         for policy in POLICIES:
             values=[]; baselines=[]; by_task=defaultdict(list); counts=Counter(); missing=[]
+            nvalues=[]; nbaselines=[]; n_by_task=defaultdict(list)
             for task, d in manifest['decisions'].items():
                 if suites is not None and d['suite'] not in suites: continue
                 for run in range(1, manifest['runs']+1):
@@ -100,6 +110,9 @@ def summarize(manifest, state):
                         missing.append(key); continue
                     values.append(a); baselines.append(b); counts[tier]+=1
                     by_task[task].append(a['score']-b['score'])
+                    na,nb=normalized(task,a),normalized(task,b)
+                    nvalues.append(na); nbaselines.append(nb)
+                    n_by_task[task].append(na-nb)
             if not values:
                 group[policy]={'missing':len(missing)}; continue
             cost=sum(float(a['usd']) for a in values)
@@ -108,21 +121,27 @@ def summarize(manifest, state):
             means=[sum(v)/len(v) for v in by_task.values()]
             rng=random.Random(20261004)
             samples=sorted(sum(rng.choices(means,k=len(means)))/len(means) for _ in range(2000))
-            per_suite={}
+            per_suite={}; per_suite_norm={}
             for suite in sorted({d['suite'] for d in manifest['decisions'].values()}):
                 ids={t for t,d in manifest['decisions'].items() if d['suite']==suite}
                 deltas=[v for t,vs in by_task.items() if t in ids for v in vs]
+                ndeltas=[v for t,vs in n_by_task.items() if t in ids for v in vs]
                 if deltas: per_suite[suite]=100*sum(deltas)/len(deltas)
+                if ndeltas: per_suite_norm[suite]=100*sum(ndeltas)/len(ndeltas)
             group[policy]={'n':len(values),'missing':len(missing),
                 'quality':sum(a['score'] for a in values)/len(values),
                 'baseline_quality':sum(a['score'] for a in baselines)/len(baselines),
                 'quality_delta_points':100*sum(a['score']-b['score'] for a,b in zip(values,baselines))/len(values),
                 'delta_ci95_points':[100*samples[49],100*samples[1949]],
+                'quality_normalized':sum(nvalues)/len(nvalues),
+                'baseline_quality_normalized':sum(nbaselines)/len(nbaselines),
+                'quality_delta_normalized_points':100*sum(na-nb for na,nb in zip(nvalues,nbaselines))/len(nvalues),
                 'estimated_usd':cost,'baseline_usd':basecost,
                 'savings_percent':100*(1-cost/basecost) if basecost else None,
                 'provider_seconds':sum(a['seconds'] for a in values),
                 'length_finishes':sum(a['response']['finish_reason']=='length' for a in values),
-                'model_counts':dict(counts),'suite_delta_points':per_suite}
+                'model_counts':dict(counts),'suite_delta_points':per_suite,
+                'suite_delta_normalized_points':per_suite_norm}
         reports[name]=group
     return reports
 

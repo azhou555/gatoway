@@ -5,8 +5,10 @@ rule) would make, on fresh tasks the bank has never seen, plus a re-grading of
 the October 4 screening that changes what the "next improvement" should be.
 
 Raw generator output: `docs/policy_results_probe.md` (artifacts
-`artifacts/policy_eval_probe_20261005`). That file shows a misleading −50/−100
-for the probe group; **this file is the interpreted verdict** and explains why.
+`artifacts/policy_eval_probe_20261005`). That report now shows both the strict
+raw score (probe group −50, a code fence counts as a miss) and the
+fence-normalized score (0.0, capability); **this file is the interpreted
+verdict** that explains the gap and its production consequence.
 
 ## 1. The probes: both robust downgrades reason correctly on fresh instances
 

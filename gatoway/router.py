@@ -13,6 +13,7 @@ here would bypass that state machine.
 from __future__ import annotations
 
 import math
+import os
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -36,6 +37,31 @@ FALLBACK_RUNG = "gpt-oss"
 # Compatibility exports for code that still calls a ladder position a tier.
 TIERS = RUNG_NAMES
 FALLBACK_TIER = FALLBACK_RUNG
+
+# --- Gated strict routing -------------------------------------------------
+# The policy screening (docs/policy_results.md) found that the only
+# quality-safe candidate raises the confident-downgrade bar and sends
+# low-evidence requests to the frontier model instead of a cheap rung. It was
+# validated on only 16 fresh structured/reasoning tasks, so it is NOT promoted
+# to production. It ships behind an env flag that defaults OFF: with the flag
+# unset the router behaves exactly as before. Flip (or revert) with one switch,
+# no data migration. See docs/policy_results.md and tasks/todo.md.
+#
+# ponytail: a single boolean gate, not a per-knob config. Validate, then either
+# flip the default or delete the old branch -- do not grow a routing config.
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+STRICT_ROUTING = _env_flag("GATOWAY_STRICT_ROUTING")
+
+STRICT_CONFIDENCE_FLOOR = 0.4
+STRICT_MIN_OBSERVATIONS = 3
+# Every qualifying neighbor must clear this (not just the rung mean). Fixed,
+# not threshold-adjusted, matching the screened `strict_evidence` policy.
+MIN_NEIGHBOR_EFFECTIVENESS = 0.95
+# Insufficient evidence routes to the frontier model under strict routing.
+LOW_EVIDENCE_FALLBACK_RUNG = "kimi"
 
 
 class RequestTooLargeError(ValueError):
@@ -95,6 +121,11 @@ def _model_rung_names() -> dict[str, str]:
 MODEL_RUNG_NAMES = _model_rung_names()
 ROUTABLE_MODEL_IDS = tuple(MODEL_RUNG_NAMES)
 
+# Primary-only map: a rung is credited only for observations of the model it
+# actually calls first. Strict routing uses this instead of MODEL_RUNG_NAMES so
+# a cheap fallback model's score never promotes a more expensive rung.
+PRIMARY_RUNG_NAMES = {rung.primary: rung.name for rung in MODEL_LADDER}
+
 
 def _context_capable_rungs(input_tokens: int) -> tuple[str, ...]:
     return tuple(
@@ -103,7 +134,12 @@ def _context_capable_rungs(input_tokens: int) -> tuple[str, ...]:
 
 
 def fallback_rung_for_tokens(input_tokens: int) -> str:
-    """Return the normal fallback, or the cheapest rung that fits the input."""
+    """Return the configured fallback, or a context-capable substitute.
+
+    Default routing falls to a cheap mid-ladder rung. Strict routing falls to
+    the frontier model, and for inputs too large for it, to the most capable
+    rung that still fits (``capable[-1]``) rather than the cheapest.
+    """
     capable = _context_capable_rungs(input_tokens)
     if not capable:
         largest_window = max(rung.context_tokens for rung in MODEL_LADDER)
@@ -111,9 +147,10 @@ def fallback_rung_for_tokens(input_tokens: int) -> str:
             f"estimated input is {input_tokens:,} tokens; largest configured "
             f"context window is {largest_window:,}"
         )
-    if FALLBACK_RUNG in capable:
-        return FALLBACK_RUNG
-    return capable[0]
+    preferred = LOW_EVIDENCE_FALLBACK_RUNG if STRICT_ROUTING else FALLBACK_RUNG
+    if preferred in capable:
+        return preferred
+    return capable[-1] if STRICT_ROUTING else capable[0]
 
 
 def _routing_decision(
@@ -147,7 +184,10 @@ def decide(
         item if isinstance(item, NeighborObservation) else _as_observation(item)
         for item in neighbors
     ]
-    confident = [item for item in observations if item.similarity >= CONFIDENCE_FLOOR]
+    floor = STRICT_CONFIDENCE_FLOOR if STRICT_ROUTING else CONFIDENCE_FLOOR
+    min_obs = STRICT_MIN_OBSERVATIONS if STRICT_ROUTING else MIN_OBSERVATIONS
+    rung_map = PRIMARY_RUNG_NAMES if STRICT_ROUTING else MODEL_RUNG_NAMES
+    confident = [item for item in observations if item.similarity >= floor]
     bar = EFFECTIVENESS_BAR + (
         current_threshold - DEFAULT_THRESHOLD
     ) * THRESHOLD_SHIFT_SCALE
@@ -167,7 +207,7 @@ def decide(
 
     by_rung: dict[str, list[NeighborObservation]] = defaultdict(list)
     for observation in confident:
-        rung_name = MODEL_RUNG_NAMES.get(observation.model_id)
+        rung_name = rung_map.get(observation.model_id)
         if rung_name is not None:
             by_rung[rung_name].append(observation)
 
@@ -177,12 +217,15 @@ def decide(
             for item in by_rung.get(rung.name, [])
             if item.effectiveness is not None
         ]
+        scores = [item.effectiveness for item in rung_observations]
+        every_neighbor_clears = not STRICT_ROUTING or all(
+            score >= MIN_NEIGHBOR_EFFECTIVENESS for score in scores
+        )
         if (
             rung.name in capable
-            and len(rung_observations) >= MIN_OBSERVATIONS
-            and sum(item.effectiveness for item in rung_observations)
-            / len(rung_observations)
-            >= bar
+            and len(rung_observations) >= min_obs
+            and sum(scores) / len(scores) >= bar
+            and every_neighbor_clears
         ):
             return _routing_decision(
                 rung.name, rung_observations, input_embedding, bar, low_confidence=False

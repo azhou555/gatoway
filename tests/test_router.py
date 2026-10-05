@@ -158,6 +158,91 @@ def test_cold_start_seed_has_three_observations_per_rung():
     assert set(counts.values()) == {3}
 
 
+def test_env_flag_controls_strict_routing(monkeypatch):
+    from gatoway import router as router_module
+
+    monkeypatch.delenv("GATOWAY_STRICT_ROUTING", raising=False)
+    assert router_module._env_flag("GATOWAY_STRICT_ROUTING") is False
+    monkeypatch.setenv("GATOWAY_STRICT_ROUTING", "true")
+    assert router_module._env_flag("GATOWAY_STRICT_ROUTING") is True
+    monkeypatch.setenv("GATOWAY_STRICT_ROUTING", "0")
+    assert router_module._env_flag("GATOWAY_STRICT_ROUTING") is False
+
+
+def test_strict_primary_only_evidence_does_not_promote_from_fallback_model(monkeypatch):
+    from gatoway import router as router_module
+
+    monkeypatch.setattr(router_module, "STRICT_ROUTING", True)
+    # Three strong `gemma` neighbors would promote the qwen3-small rung under
+    # the default pooling rule; strict routing credits only `qwen3-small`
+    # observations to that rung, so with none it falls to the frontier model.
+    neighbors = [
+        observation("gemma", 0.99, index=1),
+        observation("gemma", 0.99, index=2),
+        observation("gemma", 0.99, index=3),
+    ]
+
+    decision = decide(neighbors, FAKE_EMBEDDING, 100)
+
+    assert decision.tier == "kimi"
+    assert decision.low_confidence is True
+
+
+def test_strict_requires_three_neighbors(monkeypatch):
+    from gatoway import router as router_module
+
+    monkeypatch.setattr(router_module, "STRICT_ROUTING", True)
+    two = [
+        observation("gemma-small", 0.99, index=1),
+        observation("gemma-small", 0.99, index=2),
+    ]
+    assert decide(two, FAKE_EMBEDDING, 100).tier == "kimi"
+
+    three = two + [observation("gemma-small", 0.99, index=3)]
+    assert decide(three, FAKE_EMBEDDING, 100).tier == "gemma-small"
+
+
+def test_strict_blocks_promotion_when_a_neighbor_is_below_floor(monkeypatch):
+    from gatoway import router as router_module
+
+    monkeypatch.setattr(router_module, "STRICT_ROUTING", True)
+    # Mean 0.833 clears the 0.7 bar, but one neighbor under 0.95 blocks it.
+    neighbors = [
+        observation("gemma-small", 0.95, index=1),
+        observation("gemma-small", 0.95, index=2),
+        observation("gemma-small", 0.60, index=3),
+    ]
+
+    decision = decide(neighbors, FAKE_EMBEDDING, 100)
+
+    assert decision.tier == "kimi"
+    assert decision.low_confidence is True
+
+
+def test_strict_low_confidence_falls_back_to_frontier(monkeypatch):
+    from gatoway import router as router_module
+
+    monkeypatch.setattr(router_module, "STRICT_ROUTING", True)
+    weak = [observation("gemma-small", 1.0, similarity=0.39)]
+
+    decision = decide(weak, FAKE_EMBEDDING, 100)
+
+    assert decision.tier == "kimi"
+    assert decision.low_confidence is True
+
+
+def test_strict_oversized_input_falls_back_to_most_capable_fitting_rung(monkeypatch):
+    from gatoway import router as router_module
+
+    monkeypatch.setattr(router_module, "STRICT_ROUTING", True)
+    # 200k tokens exceeds Kimi's window; the fallback is the most capable rung
+    # that still fits, not the cheapest.
+    decision = decide([], FAKE_EMBEDDING, input_tokens=200_000)
+
+    assert decision.tier == "glm-5"
+    assert decision.low_confidence is True
+
+
 @pytest.mark.asyncio
 async def test_classify_fetches_top_k_with_model_outcomes(monkeypatch):
     from gatoway import router as router_module

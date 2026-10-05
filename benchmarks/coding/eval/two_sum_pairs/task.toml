@@ -1,0 +1,4 @@
+language = "python"
+neighborhood = "hash map"
+entrypoint = "two_sum_pairs"
+difficulty = 0.6

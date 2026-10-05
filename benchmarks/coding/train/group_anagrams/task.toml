@@ -1,0 +1,3 @@
+language = "python"
+neighborhood = "hash map"
+entrypoint = "group_anagrams"

@@ -1,0 +1,3 @@
+language = "python"
+neighborhood = "graph BFS"
+entrypoint = "rotting_oranges"

@@ -1,0 +1,96 @@
+{
+  "retrieved_at": "2026-10-04T06:02:58.323436+00:00",
+  "source": "https://openrouter.ai/api/v1/models",
+  "mapping_source": "https://nrp.ai/documentation/userdocs/ai/llm-managed/models/",
+  "assumptions": [
+    "NRP documented aliases mapped to corresponding base checkpoints; serving quantization/providers may differ.",
+    "Uncached text input and reported completion tokens; excludes judge, embeddings, retries without usage, infrastructure, fees and discounts.",
+    "Prices are current catalog estimates, not NRP invoices or historical execution-date prices."
+  ],
+  "models": {
+    "openai/gemma-small": {
+      "openrouter_id": null,
+      "reason": "NRP documents Gemma 4 12B; no corresponding OpenRouter listing. Gemma 3 12B is a different model."
+    },
+    "openai/qwen3-small": {
+      "openrouter_id": "qwen/qwen3.8-27b",
+      "canonical_slug": "qwen/qwen3.8-27b-20260814",
+      "hugging_face_id": "Qwen/Qwen3.8-27B",
+      "pricing": {
+        "prompt": "0.00000042",
+        "completion": "0.000003",
+        "input_cache_read": "0.000000085"
+      }
+    },
+    "openai/gpt-oss": {
+      "openrouter_id": "openai/gpt-oss-120b",
+      "canonical_slug": "openai/gpt-oss-120b",
+      "hugging_face_id": "openai/gpt-oss-120b",
+      "pricing": {
+        "prompt": "0.000000037",
+        "completion": "0.00000017"
+      }
+    },
+    "openai/qwen3": {
+      "openrouter_id": "qwen/qwen3.8-flash",
+      "canonical_slug": "qwen/qwen3.8-flash-20260826",
+      "hugging_face_id": "Qwen/Qwen3.8-Flash-Next",
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.00000047",
+        "input_cache_read": "0.000000016",
+        "input_cache_write": "0.0000002"
+      }
+    },
+    "openai/gemma": {
+      "openrouter_id": "google/gemma-4-31b-it",
+      "canonical_slug": "google/gemma-4-31b-it-20260402",
+      "hugging_face_id": "google/gemma-4-31B-it",
+      "pricing": {
+        "prompt": "0.00000009",
+        "completion": "0.00000034",
+        "input_cache_read": "0.00000005"
+      }
+    },
+    "openai/minimax-m2": {
+      "openrouter_id": "minimax/minimax-m2.7",
+      "canonical_slug": "minimax/minimax-m2.7-20260318",
+      "hugging_face_id": "MiniMaxAI/MiniMax-M2.7",
+      "pricing": {
+        "prompt": "0.00000021",
+        "completion": "0.00000084",
+        "input_cache_read": "0.000000042"
+      }
+    },
+    "openai/deepseek-v4-flash": {
+      "openrouter_id": "deepseek/deepseek-v4-flash-vision-exp",
+      "canonical_slug": "deepseek/deepseek-v4-flash-vision-exp-20260821",
+      "hugging_face_id": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+      "pricing": {
+        "prompt": "0.0000002156",
+        "completion": "0.0000006468",
+        "input_cache_read": "0.00000000686"
+      }
+    },
+    "openai/glm-5": {
+      "openrouter_id": "z-ai/glm-5.3",
+      "canonical_slug": "z-ai/glm-5.3-20260816",
+      "hugging_face_id": "zai-org/GLM-5.3",
+      "pricing": {
+        "prompt": "0.0000014",
+        "completion": "0.0000044",
+        "input_cache_read": "0.00000014"
+      }
+    },
+    "openai/kimi": {
+      "openrouter_id": "moonshotai/kimi-k2.7-code",
+      "canonical_slug": "moonshotai/kimi-k2.7-code-20260612",
+      "hugging_face_id": "moonshotai/Kimi-K2.7-Code",
+      "pricing": {
+        "prompt": "0.0000006712",
+        "completion": "0.00000335",
+        "input_cache_read": "0.00000018"
+      }
+    }
+  }
+}

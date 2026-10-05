@@ -57,6 +57,7 @@ Each entry uses this format:
 - [Phase 7: Agentic coding harness (2026-09-06 → 09-07)](#phase-7-agentic-coding-harness-2026-09-06--09-07)
 - [Phase 8: Wide ladder and evidence router (2026-09-07)](#phase-8-wide-ladder-and-evidence-router-2026-09-07)
 - [Phase 9: Evidence-balanced routing fix (2026-09-08)](#phase-9-evidence-balanced-routing-fix-2026-09-08)
+- [Phase 11: Coding and rubric evaluation](#phase-11-coding-and-rubric-evaluation-2026-09-30)
 - [Deliberately deferred or rejected](#deliberately-deferred-or-rejected)
 - [Current state and known debts](#current-state-and-known-debts)
 
@@ -1357,11 +1358,39 @@ Plan: `docs/plans/2026-09-24-bank-densification.md`. Not yet implemented.
 
 ---
 
+## Phase 11: Coding and rubric evaluation (2026-09-30)
+
+- **Decision:** Add six coding and two design eval tasks, with two distinct
+  train neighbors each. The new totals are 16 eval and 36 train prompts.
+- **Execution:** Reuse the agentic grader's Docker isolation flags in a shared
+  helper. Python and TypeScript answers run inside containers; tests give
+  fractional credit. Legacy live Python loop answers also run in Docker.
+  TypeScript uses Node's built-in transformation, including enums.
+- **Judging:** All live open-ended tasks now use explicit yes/no rubrics.
+  Kimi judges answers except its own, which go to GLM-5, based on the actual
+  answer model ID. Invalid JSON gets one retry; infrastructure failure raises.
+  This supersedes the MVP decision to use only a heuristic judge.
+- **Measurement:** Coding runs as a second session with thresholds reset.
+  The stability gate compares code-test pass/fail, not fractional score
+  equality. Reports include each suite and overall results. Judge overhead
+  is excluded from answer cost; the expanded gate is a new baseline.
+- **Validation:** Reference solutions pass their hidden tests. Each reference
+  fails every opposite-split same-language task after entrypoint rebinding.
+  Prompt-overlap checks cover the expanded train and eval lists. Docker
+  integration passed for Python, TypeScript (including enum transformation),
+  and the legacy loop path. Live rubric calibration passed all 24 task/judge
+  combinations; see docs/judge_calibration.md.
+- **Limit:** Dry runs use scripted coding scores and heuristic judging. Runner
+  output parsing assumes cooperative answers; hostile code could forge a
+  summary, so adversarial evaluation would need an external result channel.
+
+---
+
 ## Deliberately deferred or rejected
 
 | Item | Status | Reason | Revisit when |
 |---|---|---|---|
-| Real LLM judge | Rejected for MVP | It adds its own cost, model choice, and variance. Execution scoring replaced it where tasks allow. | Open-ended tasks become central to the eval |
+| Real LLM judge | Implemented; calibration passed | Boolean rubrics for all live open-ended tasks; actual answer model selects the other judge. | Off-ladder judge when available |
 | Escalation routing (cheap → verify → escalate) | Deferred | Needs a verifier, and multiplies latency | Low-confidence fallback shown to cost real money |
 | Task decomposition | Not started | Gated on cost per passing outcome | Build step 5 |
 | `parent_routing_id` / `split` columns | Designed, not applied | Only needed with decomposition | With decomposition |
@@ -1386,15 +1415,17 @@ characterization probe, and the latency benchmark.
 
 **Open risks:**
 
-1. **Bank density.** The router mostly falls back to `gpt-oss` because
-   too few task clusters have two same-model scored observations. This is
-   the main blocker for pruning rungs and for a passing ladder gate.
-1b. **Seed-time eval leakage** (§10.1). Five of eight eval prompts are in the
-   seed bank, three verbatim, so every recorded ladder-gate number carries a
-   caveat until the guard in the plan's Task 1 lands.
+1. **Bank coverage.** The measured bank provides qualifying observations on
+   all eight rungs for all 16 eval tasks. Coverage beyond these deliberately
+   populated neighborhoods remains unmeasured.
+1b. **Seed-time eval leakage** (§10.1). Source prompts are fixed and guarded.
+   The isolated measured bank excludes historical seed rows; historical
+   measurements and the original database retain their leakage caveat.
 2. **MoE cost ordering** (§2.2, §5.3). The parameter-count proxy has no
    independent validation.
-3. **Heuristic judge** (§6.3) on two of eight tasks.
+3. **Judge reliability.** Both judges passed reference/non-answer calibration
+   across all 12 open-ended tasks. This checks clear examples, not agreement
+   on borderline answers; same-ladder judge bias remains an open risk.
 4. **The agentic report is stale.** It was measured with the three-tier
    router and has not been re-run on the eight-rung ladder.
 

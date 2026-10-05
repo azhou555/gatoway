@@ -1,0 +1,4 @@
+language = "design"
+neighborhood = "system design"
+entrypoint = ""
+rubric = ["Separates large paste content from searchable metadata or explains equivalent storage.", "Enforces expiry on reads, not only during background cleanup.", "Uses unguessable identifiers and authorization for private content.", "Describes cache behavior and deletion invalidation.", "Controls upload size or creation rate to prevent abuse."]

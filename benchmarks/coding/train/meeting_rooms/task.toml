@@ -1,0 +1,3 @@
+language = "python"
+neighborhood = "intervals"
+entrypoint = "meeting_rooms"

@@ -1,0 +1,4 @@
+language = "python"
+neighborhood = "intervals"
+entrypoint = "merge_intervals"
+difficulty = 0.6

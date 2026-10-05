@@ -20,6 +20,8 @@ Status: **current** | **generated** (regenerable, see command) | **superseded** 
 |---|---|---|
 | [policy_results.md](policy_results.md) | current | Seven-policy screening, 342/342 outcomes scored. |
 | [policy_comparison.md](policy_comparison.md) | current | Protocol and limitations for policy_results.md (hand-written). |
+| [downgrade_probe_results.md](downgrade_probe_results.md) | current | Fresh-task validation of the strict_evidence downgrades; fence-normalization re-grading (hand-written verdict). |
+| [policy_results_probe.md](policy_results_probe.md) | generated | Raw probe-run output; superseded by downgrade_probe_results.md (its probe-group scores are pre-fence-normalization). |
 
 ## Cost
 
@@ -67,6 +69,7 @@ Derived reports and the exact command that rewrites each. Regenerating needs the
 | eval_report.md | `.venv/bin/python -m gatoway.eval` |
 | agentic_eval_report.md | `.venv/bin/python -m gatoway.agentic_eval` |
 | policy_results.md | `.venv/bin/python scripts/report_policy_eval.py artifacts/policy_eval_20261004 --output docs/policy_results.md` |
+| policy_results_probe.md | `.venv/bin/python scripts/report_policy_eval.py artifacts/policy_eval_probe_20261005 --output docs/policy_results_probe.md` |
 | bank_density.md | `.venv/bin/python -m gatoway.bank_density` |
 | nrp_characterization.md | `.venv/bin/python -m gatoway.characterize` |
 

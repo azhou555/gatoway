@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { validParentheses } from './solution.ts';
+test('case 0', () => assert.deepEqual(validParentheses(...["()[]{}"] as any), true));
+test('case 1', () => assert.deepEqual(validParentheses(...["([)]"] as any), false));
+test('case 2', () => assert.deepEqual(validParentheses(...[""] as any), true));
+test('case 3', () => assert.deepEqual(validParentheses(...["("] as any), false));
+test('case 4', () => assert.deepEqual(validParentheses(...["]"] as any), false));
+test('case 5', () => assert.deepEqual(validParentheses(...["{[]}"] as any), true));
+test('case 6', () => assert.deepEqual(validParentheses(...["a"] as any), false));

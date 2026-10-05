@@ -215,12 +215,9 @@ def approximate_rung(
     return MODEL_LADDER[index].name
 
 
-async def classify(
-    text: str, pool, current_threshold: float = DEFAULT_THRESHOLD
-) -> RoutingDecision:
-    """Embed ``text``, fetch top-k scored neighbors/model, and decide."""
-    vector = embed(text)
-    rows = await pool.fetch(
+async def fetch_neighbors(vector: list[float], pool):
+    """Retrieve the scored neighbors used by routing and bank density checks."""
+    return await pool.fetch(
         """
         WITH ranked AS (
             SELECT routing_id, model_id, calculated_effectiveness,
@@ -245,4 +242,12 @@ async def classify(
         NEIGHBORS_PER_MODEL,
         ROUTABLE_MODEL_IDS,
     )
+
+
+async def classify(
+    text: str, pool, current_threshold: float = DEFAULT_THRESHOLD
+) -> RoutingDecision:
+    """Embed a request, fetch top-k scored neighbors/model, and decide."""
+    vector = embed(text)
+    rows = await fetch_neighbors(vector, pool)
     return decide(rows, vector, estimate_tokens(text), current_threshold)

@@ -15,6 +15,24 @@ from gatoway.providers import (
 )
 
 
+async def test_judge_can_disable_reasoning_fallback(monkeypatch):
+    from types import SimpleNamespace
+    import gatoway.providers as module
+    async def fake(**kwargs):
+        assert "allow_reasoning_fallback" not in kwargs
+        return SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20),
+            choices=[SimpleNamespace(message=SimpleNamespace(
+                content=None, reasoning_content='{"criteria":[true]}'), finish_reason="length")],
+        )
+    monkeypatch.setattr(module.litellm, "acompletion", fake)
+    monkeypatch.setenv("NRP_API_KEY", "test")
+    answer = await module.call_provider("openai/glm-5", [], allow_reasoning_fallback=False)
+    assert answer.content == ""
+    normal = await module.call_provider("openai/glm-5", [])
+    assert normal.content == '{"criteria":[true]}'
+
+
 def test_cost_scales_with_params_and_tokens():
     # cents per 1M tokens == params in billions, flat across in/out tokens.
     assert cost_cents("openai/qwen3", 500_000, 500_000) == 180.0

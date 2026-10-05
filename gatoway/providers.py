@@ -126,7 +126,8 @@ def cost_cents(model: str, input_tokens: int, output_tokens: int) -> float:
     return MODEL_PARAMS_B.get(model, 0.0) * (input_tokens + output_tokens) / 1e6
 
 
-async def call_provider(model: str, messages: list[dict], **kwargs) -> ProviderResponse:
+async def call_provider(model: str, messages: list[dict], *,
+                        allow_reasoning_fallback: bool = True, **kwargs) -> ProviderResponse:
     """Call a specific litellm model string and return a normalized response.
 
     Note: takes a concrete model string (e.g. "openai/qwen3-small"), not a
@@ -151,7 +152,9 @@ async def call_provider(model: str, messages: list[dict], **kwargs) -> ProviderR
     # `content`. If one ever doesn't, this embeds and scores its chain of
     # thought as the answer, corrupting a decision_history row rather than
     # failing loudly. Raise instead of falling back if that shows up.
-    content = message.content or getattr(message, "reasoning_content", None) or ""
+    content = message.content or ""
+    if not content and allow_reasoning_fallback:
+        content = getattr(message, "reasoning_content", None) or ""
 
     return ProviderResponse(
         content=content,

@@ -1,0 +1,4 @@
+language = "design"
+neighborhood = "system design"
+entrypoint = ""
+rubric = ["Specifies a token-bucket or equivalent mechanism for burst and sustained limits.", "Updates per-tenant allowance atomically across gateways.", "Describes partitioning state by tenant to scale.", "Handles clock differences or uses an authoritative time source.", "Chooses and justifies fail-open or fail-closed behavior during state-store outages."]

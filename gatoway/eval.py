@@ -5,11 +5,10 @@ Runs a small hand-written, held-out benchmark suite (eval split -- never
 written back to decision_history, see gatoway/batch_job.py) through two
 paths:
     1. The router picks a model rung per task, then calls its provider.
-       called.
     2. An "always highest-rung" baseline: every task goes to the last rung.
 
 ...then reports cost (sum of cost_cents) and effectiveness (per-task exact
-match, fixture execution, or heuristic judge score -- see BenchmarkTask)
+match, fixture execution, Docker hidden tests, or rubric judge score)
 for both,
 and the headline cost-reduction / effectiveness-delta numbers.
 
@@ -18,6 +17,7 @@ be up. It talks to gatoway.router / gatoway.providers in-process.
 
 Modes:
     --dry-run   Use canned response bands instead of calling litellm.
+                No Docker required; code scores are scripted and judges heuristic.
                 Auto-selected if NRP_API_KEY is not set in the
                 environment (with a printed notice -- never silently
                 guessed).
@@ -45,7 +45,13 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from gatoway.bank_corpus import TrainPrompt
+
+from gatoway.coding_tasks import load_tasks, fenced_reference
+from gatoway.rubrics import RUBRICS
 from gatoway.providers import (
     MODEL_PARAMS_B,
     RUNG_NAMES,
@@ -63,7 +69,7 @@ REPORT_PATH = Path(__file__).resolve().parent.parent / "docs" / "eval_report.md"
 # min-max behavior that single-request evaluation previously skipped.
 EVAL_EXPECTED_TURN_COUNT = 3
 DEFAULT_EVAL_RUNS = 3
-EVAL_PROVIDER_TIMEOUT_SECONDS = 60.0
+EVAL_PROVIDER_TIMEOUT_SECONDS = 120.0
 EVAL_PROVIDER_ATTEMPTS = 2
 EVAL_MAX_TOKENS = 512
 EVAL_TEMPERATURE = 0.0
@@ -102,6 +108,13 @@ class BenchmarkTask:
     # consistently thorough. This is what makes the dry-run report tell a
     # non-degenerate story (not "everything scores identically").
     canned_responses: dict[str, str] = field(default_factory=dict)
+    suite: str = "original"
+    rubric: list[str] = field(default_factory=list)
+    task_dir: Path | None = None
+    language: str = ""
+    reference_response: str = ""
+    expected_json: object = None
+    category: str = ""
 
 
 BENCHMARK_TASKS: list[BenchmarkTask] = [
@@ -218,13 +231,51 @@ BENCHMARK_TASKS: list[BenchmarkTask] = [
 ]
 
 
+for _task in BENCHMARK_TASKS:
+    _task.rubric = RUBRICS.get(_task.task_id, [])
+    _task.reference_response = _task.canned_responses["frontier"]
+
+for _artifact in load_tasks("eval"):
+    _reference = fenced_reference(_artifact)
+    _low = ("No detailed proposal." if _artifact.language == "design" else
+            chr(96) * 3 + _artifact.language + "\n// incomplete answer\n" + chr(96) * 3)
+    BENCHMARK_TASKS.append(BenchmarkTask(
+        task_id=_artifact.task_id, prompt=_artifact.prompt,
+        scoring_method="llm_judge" if _artifact.language == "design" else "code_tests",
+        expected=[], difficulty=_artifact.difficulty,
+        canned_responses={"cheap": _low, "medium": _reference, "frontier": _reference},
+        suite="coding", rubric=_artifact.rubric, task_dir=_artifact.directory,
+        language=_artifact.language, reference_response=_reference,
+    ))
+
+
+def benchmark_tasks(suite: str = "legacy") -> list[BenchmarkTask]:
+    """Keep the historical suite stable; breadth is an explicit new baseline."""
+    if suite == "legacy":
+        return list(BENCHMARK_TASKS)
+    if suite != "expanded":
+        raise ValueError(f"unknown suite: {suite}")
+    import json
+    from gatoway.breadth_tasks import load_cases
+    additions = []
+    for case in load_cases():
+        reference = json.dumps(case["answer"], ensure_ascii=False)
+        additions.append(BenchmarkTask(
+            task_id=case["task_id"], prompt=case["prompt"], scoring_method="json_exact",
+            expected=[], expected_json=case["answer"], difficulty=case["difficulty"],
+            suite=case["suite"], category=case["category"], reference_response=reference,
+            canned_responses={band: reference for band in ("cheap", "medium", "frontier")},
+        ))
+    return [*BENCHMARK_TASKS, *additions]
+
+
 def score_exact_match(response: str, expected: list[str]) -> float:
     """1.0 if every required substring appears in the response (case-insensitive),
     else 0.0. Deliberately binary -- this is the pass/fail branch of SPEC.md §8's
     "exact-match / execution-based pass-fail" scoring.
     """
-    lowered = response.lower()
-    return 1.0 if all(term.lower() in lowered for term in expected) else 0.0
+    lowered = response.lower().replace("−", "-")
+    return 1.0 if all(term.lower().replace("−", "-") in lowered for term in expected) else 0.0
 
 
 # --- Execution-based scorers ----------------------------------------------
@@ -313,8 +364,11 @@ def _safe_python_tree(candidate: str) -> ast.Module | None:
     return tree
 
 
-def score_python_execution(response: str) -> float:
-    """Execute a constrained loop against fixtures for the off-by-one task."""
+def score_python_execution(
+    response: str,
+    fixtures: tuple[tuple[list[int], list[tuple[object, ...]]], ...] | None = None,
+) -> float:
+    """Execute a constrained loop against trusted input/output fixtures."""
     if re.search(
         r"^\s*(?:from\s+\S+\s+import|import|while|def|class)\b",
         response,
@@ -322,14 +376,20 @@ def score_python_execution(response: str) -> float:
     ):
         return 0.0
 
-    fixtures = ([10, 20, 30], [7], [])
+    if fixtures is None:
+        fixtures = tuple(
+            (values, [(value,) for value in values])
+            for values in ([10, 20, 30], [7], [])
+        )
+    if not fixtures:
+        raise ValueError("execution scoring requires at least one fixture")
     for candidate in _python_candidates(response):
         tree = _safe_python_tree(candidate)
         if tree is None:
             continue
 
         passed = True
-        for values in fixtures:
+        for values, expected_output in fixtures:
             printed: list[tuple[object, ...]] = []
 
             def capture_print(*args, **kwargs):
@@ -350,7 +410,7 @@ def score_python_execution(response: str) -> float:
             except Exception:  # A candidate that does not run simply fails the fixture.
                 passed = False
                 break
-            if printed != [(value,) for value in values]:
+            if printed != expected_output:
                 passed = False
                 break
         if passed:
@@ -413,13 +473,19 @@ def _run_salary_query(query: str, salaries: list[int]) -> list[tuple[object, ...
         connection.close()
 
 
-def score_sql_execution(response: str) -> float:
-    """Run a read-only query against fixtures with duplicate top salaries."""
-    fixtures = (
-        ([100, 100, 90, 80], [(90,)]),
-        ([50, 40, 40, 30], [(40,)]),
-        ([7, 3], [(3,)]),
-    )
+def score_sql_execution(
+    response: str,
+    fixtures: tuple[tuple[list[int], list[tuple[object, ...]]], ...] | None = None,
+) -> float:
+    """Run a read-only query against trusted salary/result fixtures."""
+    if fixtures is None:
+        fixtures = (
+            ([100, 100, 90, 80], [(90,)]),
+            ([50, 40, 40, 30], [(40,)]),
+            ([7, 3], [(3,)]),
+        )
+    if not fixtures:
+        raise ValueError("execution scoring requires at least one fixture")
     for candidate in _sql_candidates(response):
         if all(
             _run_salary_query(candidate, salaries) == expected
@@ -431,14 +497,12 @@ def score_sql_execution(response: str) -> float:
 
 # --- llm_judge stub --------------------------------------------------------
 #
-# SPEC.md §8 calls for "LLM-judge / rubric scoring" on open-ended tasks. For
-# this MVP we do NOT call a real judge model -- that's out of scope per the
-# task brief. Instead this is a cheap heuristic stand-in: half the score
+# Dry runs alone use this heuristic stand-in. Live scoring uses judge.py.
+# Half the score
 # comes from response length relative to a target (a proxy for "did it
 # actually explain itself" vs a one-liner), half from how many of the task's
 # pre-registered keywords showed up (a proxy for "did it cover the right
-# concepts"). This is NOT a substitute for a real rubric-based judge -- swap
-# this function out first if this harness graduates past a demo.
+# concepts"). Scripted scores do not measure live answer correctness.
 LLM_JUDGE_TARGET_LENGTH_CHARS = 220
 
 
@@ -452,14 +516,19 @@ def score_llm_judge_stub(response: str, keywords: list[str]) -> float:
     return 0.5 * length_component + 0.5 * keyword_component
 
 
-def score_task(task: BenchmarkTask, response_text: str) -> float:
+def score_task(task: BenchmarkTask | TrainPrompt, response_text: str, *, dry_run: bool = False) -> float:
+    if task.scoring_method == "json_exact":
+        from gatoway.breadth_tasks import score_json
+        return score_json(response_text, task.expected_json)
     if task.scoring_method == "exact_match":
         return score_exact_match(response_text, task.expected)
     if task.scoring_method == "python_execution":
-        return score_python_execution(response_text)
+        return score_python_execution(response_text, getattr(task, "execution_fixtures", None))
     if task.scoring_method == "sql_execution":
-        return score_sql_execution(response_text)
+        return score_sql_execution(response_text, getattr(task, "execution_fixtures", None))
     if task.scoring_method == "llm_judge":
+        if not dry_run:
+            raise ValueError("live rubric scoring requires await bank_corpus.score")
         return score_llm_judge_stub(response_text, task.expected)
     raise ValueError(f"unknown scoring_method {task.scoring_method!r}")
 
@@ -492,7 +561,7 @@ async def _real_provider(tier: str, task: BenchmarkTask) -> ProviderResponse:
                     model,
                     [{"role": "user", "content": task.prompt}],
                     temperature=EVAL_TEMPERATURE,
-                    max_tokens=EVAL_MAX_TOKENS,
+                    max_tokens=2048 if task.suite == "coding" else EVAL_MAX_TOKENS,
                 ),
                 timeout=EVAL_PROVIDER_TIMEOUT_SECONDS,
             )
@@ -507,7 +576,7 @@ async def _real_provider(tier: str, task: BenchmarkTask) -> ProviderResponse:
 
 
 async def pick_router_tier(
-    task: BenchmarkTask, pool, current_threshold: float = DEFAULT_THRESHOLD
+    task: BenchmarkTask, pool, current_threshold: float = DEFAULT_THRESHOLD, *, require_db=False
 ) -> str:
     """Route `task` through the real router when a DB is available, else
     fall back to a standalone approximation. See module docstring.
@@ -519,11 +588,15 @@ async def pick_router_tier(
             decision = await classify(task.prompt, pool, current_threshold)
             return decision.tier
         except Exception as exc:  # DB reachable at connect time but query failed, etc.
+            if require_db:
+                raise
             print(f"  [warn] classify() failed for {task.task_id!r} ({exc}); "
                   f"falling back to standalone difficulty-based routing")
 
     # Standalone fallback: no DB, or classify() failed. This approximation is
     # eval-only; production always selects from per-model outcome evidence.
+    if require_db:
+        raise RuntimeError("DB-backed evaluation requires a working database")
     return approximate_rung(task.difficulty, current_threshold)
 
 
@@ -534,6 +607,7 @@ class TaskResult:
     cost_cents: float
     score: float
     current_threshold: float
+    suite: str = "original"
 
 
 @dataclass
@@ -542,21 +616,27 @@ class EvalRun:
     baseline_results: list[TaskResult]
 
 
-async def run_eval(dry_run: bool, pool) -> tuple[list[TaskResult], list[TaskResult]]:
-    """Run the benchmark tasks as consecutive turns in one session."""
+async def run_eval(dry_run: bool, pool, *, require_db=False, tasks=None) -> tuple[list[TaskResult], list[TaskResult]]:
+    """Run the original and coding suites as independent simulated sessions."""
+    from gatoway.bank_corpus import score
+    from gatoway.code_grader import CodeGrader
+    grader = CodeGrader()
     provider_fn = _dry_run_provider if dry_run else _real_provider
 
     router_results: list[TaskResult] = []
     baseline_results: list[TaskResult] = []
 
-    for turn_number, task in enumerate(BENCHMARK_TASKS, start=1):
+    turn_counts: dict[str, int] = {}
+    for task in (BENCHMARK_TASKS if tasks is None else tasks):
+        turn_counts[task.suite] = turn_counts.get(task.suite, 0) + 1
+        turn_number = turn_counts[task.suite]
         current_threshold = compute_threshold(
             turn_count=turn_number,
             expected_turn_count=EVAL_EXPECTED_TURN_COUNT,
         )
-        router_tier = await pick_router_tier(task, pool, current_threshold)
+        router_tier = await pick_router_tier(task, pool, current_threshold, require_db=require_db)
         print(
-            f"  [turn {turn_number}/{len(BENCHMARK_TASKS)}] {task.task_id}: "
+            f"  [{task.suite} turn {turn_number}/8] {task.task_id}: "
             f"threshold={current_threshold:.2f}, router={router_tier}",
             flush=True,
         )
@@ -565,7 +645,9 @@ async def run_eval(dry_run: bool, pool) -> tuple[list[TaskResult], list[TaskResu
             task_id=task.task_id,
             tier=router_tier,
             cost_cents=router_response.cost_cents,
-            score=score_task(task, router_response.content),
+            score=await score(task, router_response.content, router_response.model_id,
+                              dry_run=dry_run, grader=grader),
+            suite=task.suite,
             current_threshold=current_threshold,
         ))
 
@@ -575,14 +657,16 @@ async def run_eval(dry_run: bool, pool) -> tuple[list[TaskResult], list[TaskResu
             task_id=task.task_id,
             tier=baseline_tier,
             cost_cents=baseline_response.cost_cents,
-            score=score_task(task, baseline_response.content),
+            score=await score(task, baseline_response.content, baseline_response.model_id,
+                              dry_run=dry_run, grader=grader),
+            suite=task.suite,
             current_threshold=current_threshold,
         ))
 
     return router_results, baseline_results
 
 
-async def run_eval_repeated(dry_run: bool, pool, runs: int) -> list[EvalRun]:
+async def run_eval_repeated(dry_run: bool, pool, runs: int, *, require_db=False, checkpoint: Path | None = None, tasks=None) -> list[EvalRun]:
     """Run the same held-out session repeatedly for stability measurement."""
     if runs < 1:
         raise ValueError("runs must be at least 1")
@@ -590,8 +674,19 @@ async def run_eval_repeated(dry_run: bool, pool, runs: int) -> list[EvalRun]:
     results: list[EvalRun] = []
     for run_number in range(1, runs + 1):
         print(f"[run {run_number}/{runs}] starting simulated session", flush=True)
-        router_results, baseline_results = await run_eval(dry_run, pool)
+        router_results, baseline_results = await run_eval(dry_run, pool, require_db=require_db, tasks=tasks)
         results.append(EvalRun(router_results, baseline_results))
+        if checkpoint:
+            from dataclasses import asdict
+            import json
+            from gatoway.judge import JUDGE_VERSION
+            checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint.write_text(json.dumps({
+                "dry_run": dry_run, "require_db": require_db,
+                "task_ids": [task.task_id for task in (BENCHMARK_TASKS if tasks is None else tasks)],
+                "judge_version": JUDGE_VERSION,
+                "runs": [asdict(run) for run in results],
+            }, indent=2) + "\n")
     return results
 
 
@@ -619,8 +714,8 @@ def _mean_range(
     return f"{mean} ({low}{range_separator}{high})"
 
 
-def _results_by_task(runs: list[EvalRun], side: str) -> dict[str, list[TaskResult]]:
-    grouped = {task.task_id: [] for task in BENCHMARK_TASKS}
+def _results_by_task(runs: list[EvalRun], side: str, tasks=None) -> dict[str, list[TaskResult]]:
+    grouped = {task.task_id: [] for task in (BENCHMARK_TASKS if tasks is None else tasks)}
     for run in runs:
         results = run.router_results if side == "router" else run.baseline_results
         for result in results:
@@ -628,26 +723,31 @@ def _results_by_task(runs: list[EvalRun], side: str) -> dict[str, list[TaskResul
     return grouped
 
 
-def stability_gate(runs: list[EvalRun]) -> tuple[bool, str]:
+def stability_gate(runs: list[EvalRun], tasks=None) -> tuple[bool, str]:
     """Require stable binary scores for every checkable task over 3+ runs."""
     if len(runs) < 3:
         return False, f"not evaluated: {len(runs)}/3 required runs"
 
+    tasks = BENCHMARK_TASKS if tasks is None else tasks
     checkable = {
         task.task_id
-        for task in BENCHMARK_TASKS
-        if task.scoring_method in {"exact_match", "python_execution", "sql_execution"}
+        for task in tasks
+        if task.scoring_method in {"exact_match", "python_execution", "sql_execution", "code_tests", "json_exact"}
     }
     unstable: list[str] = []
     for side in ("router", "baseline"):
-        grouped = _results_by_task(runs, side)
+        grouped = _results_by_task(runs, side, tasks)
         for task_id in checkable:
-            if len({result.score for result in grouped[task_id]}) != 1:
+            task = next(task for task in tasks if task.task_id == task_id)
+            results = grouped[task_id]
+            scores = {float(result.score == 1.0) if task.scoring_method == "code_tests"
+                      else result.score for result in results}
+            if len(results) != len(runs) or len(scores) != 1:
                 unstable.append(f"{side}/{task_id}")
 
     if unstable:
         return False, "unstable scores: " + ", ".join(sorted(unstable))
-    return True, "all six exact/execution tasks were identical across runs"
+    return True, f"all {len(checkable)} checkable tasks had stable pass/fail outcomes"
 
 
 def build_report(
@@ -655,10 +755,12 @@ def build_report(
     dry_run: bool,
     db_backed: bool | None = None,
     bank_rows: int | None = None,
+    tasks=None,
 ) -> str:
     """Build a session-level report with per-task means and ranges."""
     if not runs:
         raise ValueError("at least one eval run is required")
+    tasks = BENCHMARK_TASKS if tasks is None else tasks
 
     router_costs = [sum(result.cost_cents for result in run.router_results) for run in runs]
     baseline_costs = [sum(result.cost_cents for result in run.baseline_results) for run in runs]
@@ -680,15 +782,15 @@ def build_report(
     # Neither mode has a real currency figure: NRP publishes no per-token
     # prices, so cost is a parameter-count proxy either way (see
     # param_count_b() above). Be explicit rather than imply real dollars.
-    cost_label = "Compute Proxy (B params)" if dry_run else "Cost Proxy (¢)"
-    cost_word = "compute-proxy" if dry_run else "cost"
+    cost_label = "Compute Proxy (B params)" if dry_run else "Cost Proxy (arbitrary units)"
+    cost_word = "compute-proxy" if dry_run else "cost-proxy"
     cost_fmt = "{:.1f}".format if dry_run else "{:.3f}".format
     score_fmt = "{:.2f}".format
     pct_fmt = "{:.1f}%".format
 
-    router_by_task = _results_by_task(runs, "router")
-    baseline_by_task = _results_by_task(runs, "baseline")
-    gate_passed, gate_detail = stability_gate(runs)
+    router_by_task = _results_by_task(runs, "router", tasks)
+    baseline_by_task = _results_by_task(runs, "baseline", tasks)
+    gate_passed, gate_detail = stability_gate(runs, tasks)
     effectiveness_delta_summary = _mean_range(
         effectiveness_deltas,
         lambda value: f"{value:+.1f} pt",
@@ -708,14 +810,23 @@ def build_report(
     )
     lines.append(
         "_Scoring: exact match for factual tasks; constrained Python/SQLite "
-        "fixture execution for code and SQL; heuristic judging only for the "
-        "two open-ended tasks._\n"
+        "fixtures for legacy tasks; "
+        + ("scripted coding scores and heuristic judging in dry-run. No containers run._\n"
+           if dry_run else
+           "Docker execution for all Python/TypeScript answers; rubric LLM judging "
+           "for all open-ended tasks (judge overhead excluded from answer cost)._\n")
     )
+    sessions = "two" if len(tasks) == 16 else "four" if len(tasks) == 32 else str(len({t.suite for t in tasks}))
     lines.append(
-        f"_Session evaluation: {len(BENCHMARK_TASKS)} consecutive turns per run; "
+        f"_Session evaluation: {sessions} independent eight-turn sessions per run; "
         f"expected turn count {EVAL_EXPECTED_TURN_COUNT}; thresholds therefore "
         "rise on later turns._\n"
     )
+    from gatoway.judge import JUDGE_VERSION
+    lines.append(f"_Judge version: {JUDGE_VERSION}. Strict whole-response JSON equality grades the breadth tasks._\n")
+    if any(task.scoring_method == "json_exact" for task in tasks):
+        lines.append("Breadth tasks are held-out generalization challenges; the historical training bank "
+                     "has not been expanded to cover them. Report their quality separately from the original suites.\n")
     if db_backed is not None:
         if db_backed:
             bank_detail = f" ({bank_rows} rows)" if bank_rows is not None else ""
@@ -724,13 +835,12 @@ def build_report(
             )
         else:
             lines.append(
-                "_Routing: standalone difficulty-label approximation; PostgreSQL "
-                "was unavailable._\n"
+                "_Routing: standalone difficulty-label approximation; no database used._\n"
             )
     if not dry_run:
         lines.append(
             f"_Generation controls: temperature {EVAL_TEMPERATURE:g}, "
-            f"maximum {EVAL_MAX_TOKENS} tokens, {EVAL_PROVIDER_TIMEOUT_SECONDS:g}s "
+            f"maximum {EVAL_MAX_TOKENS} tokens for original tasks / 2048 for coding, {EVAL_PROVIDER_TIMEOUT_SECONDS:g}s "
             f"timeout, {EVAL_PROVIDER_ATTEMPTS - 1} timeout retry._\n"
         )
     lines.append(
@@ -740,20 +850,24 @@ def build_report(
         f"{effectiveness_delta_summary} "
         "effectiveness delta vs always-highest-rung.**\n"
     )
+    lines.append("Expanded suite: a new baseline; not comparable to historical eight-task gates.\n")
     lines.append(f"**Stability gate: {'PASS' if gate_passed else 'FAIL'}** — {gate_detail}.\n")
     lines.append(
-        f"| Turn | Task | Threshold | Router Tier(s) | Router {cost_label} mean (range) | "
+        f"| Suite/Turn | Task | Threshold | Router Tier(s) | Router {cost_label} mean (range) | "
         f"Router Score mean (range) | Baseline {cost_label} mean (range) | "
         "Baseline Score mean (range) |"
     )
     lines.append("|---:|---|---:|---|---:|---:|---:|---:|")
-    for turn_number, task in enumerate(BENCHMARK_TASKS, start=1):
+    turns: dict[str, int] = {}
+    for task in tasks:
+        turns[task.suite] = turns.get(task.suite, 0) + 1
+        turn_number = turns[task.suite]
         router_results = router_by_task[task.task_id]
         baseline_results = baseline_by_task[task.task_id]
         tiers = " / ".join(dict.fromkeys(result.tier for result in router_results))
         always_range = task.scoring_method == "llm_judge"
         lines.append(
-            f"| {turn_number} | {task.task_id} | "
+            f"| {task.suite}/{turn_number} | {task.task_id} | "
             f"{router_results[0].current_threshold:.2f} | {tiers} | "
             f"{_mean_range([r.cost_cents for r in router_results], cost_fmt)} | "
             f"{_mean_range([r.score for r in router_results], score_fmt, always_range)} | "
@@ -770,6 +884,20 @@ def build_report(
         f"{_mean_range([value * 100 for value in baseline_effectiveness], pct_fmt, always_range=True)} "
         "effective."
     )
+    lines.append("\n## Per-suite results\n")
+    lines.append("| Suite | Router effectiveness | Baseline effectiveness | Cost reduction |")
+    lines.append("|---|---:|---:|---:|")
+    for suite in dict.fromkeys(task.suite for task in tasks):
+        router = [[r for r in run.router_results if r.suite == suite] for run in runs]
+        baseline = [[r for r in run.baseline_results if r.suite == suite] for run in runs]
+        reductions = [_pct(sum(b.cost_cents for b in bs) - sum(r.cost_cents for r in rs),
+                           sum(b.cost_cents for b in bs)) for rs, bs in zip(router, baseline)]
+        lines.append(
+            f"| {suite} | "
+            f"{_mean_range([_mean([r.score for r in rs])*100 for rs in router], pct_fmt)} | "
+            f"{_mean_range([_mean([r.score for r in bs])*100 for bs in baseline], pct_fmt)} | "
+            f"{_mean_range(reductions, pct_fmt)} |"
+        )
     return "\n".join(lines)
 
 
@@ -787,30 +915,45 @@ async def _try_get_pool():
         return None
 
 
-async def _main(dry_run: bool, runs: int) -> None:
-    pool = await _try_get_pool()
+async def _main(dry_run: bool, runs: int, *, require_db=False, database=None, checkpoint=None,
+                suite="legacy", report=None) -> None:
+    tasks = benchmark_tasks(suite)
+    report_path = report or (REPORT_PATH if suite == "legacy" else REPORT_PATH.with_name("eval_report_expanded.md"))
+    if database:
+        from gatoway.bootstrap_bank import isolated_pool
+        pool = await isolated_pool(database)
+        require_db = True
+    else:
+        pool = await _try_get_pool()
+    if require_db and pool is None:
+        raise RuntimeError("DB-backed evaluation requires a working database")
     bank_rows = (
         await pool.fetchval("SELECT count(*) FROM decision_history")
         if pool is not None
         else None
     )
     try:
-        eval_runs = await run_eval_repeated(dry_run, pool, runs)
+        eval_runs = await run_eval_repeated(dry_run, pool, runs, require_db=require_db, checkpoint=checkpoint, tasks=tasks)
     finally:
         if pool is not None:
             from gatoway.db import close_pool
 
-            await close_pool()
+            if database:
+                await pool.close()
+            else:
+                await close_pool()
 
     report = build_report(
         eval_runs,
         dry_run,
         db_backed=pool is not None,
         bank_rows=bank_rows,
+        tasks=tasks,
     )
     print(report)
-    REPORT_PATH.write_text(report + "\n")
-    print(f"\n[info] Wrote report to {REPORT_PATH}")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report + "\n")
+    print(f"\n[info] Wrote report to {report_path}")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -823,6 +966,13 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_EVAL_RUNS,
         help=f"Repeated sessions to aggregate (default: {DEFAULT_EVAL_RUNS}).",
     )
+    parser.add_argument("--require-db", action="store_true",
+                        help="Fail rather than approximate routing if the database fails.")
+    parser.add_argument("--database", help="Use a marked isolated gatoway_eval_ database.")
+    parser.add_argument("--checkpoint", type=Path, help="Record structured per-run results.")
+    parser.add_argument("--suite", choices=("legacy", "expanded"), default="legacy",
+                        help="Original 16 tasks, or 32 including objective breadth tasks.")
+    parser.add_argument("--report", type=Path, help="Write to a separate report path.")
     return parser.parse_args()
 
 
@@ -830,8 +980,12 @@ if __name__ == "__main__":
     args = _parse_args()
     dry_run = args.dry_run
     if not dry_run and not os.environ.get("NRP_API_KEY"):
+        if args.require_db or args.database:
+            raise SystemExit("Live DB-backed gate requires NRP_API_KEY")
         print("[info] No NRP_API_KEY set -- auto-falling back to --dry-run.")
         dry_run = True
     if args.runs < 1:
         raise SystemExit("--runs must be at least 1")
-    asyncio.run(_main(dry_run, args.runs))
+    asyncio.run(_main(dry_run, args.runs, require_db=args.require_db,
+                      database=args.database, checkpoint=args.checkpoint,
+                      suite=args.suite, report=args.report))

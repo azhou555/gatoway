@@ -55,8 +55,8 @@ def to_pgvector(values: list[float]) -> list[float]:
 
 # (prompt, canned "response" text, difficulty)
 CHEAP_EXAMPLES: list[tuple[str, str, float]] = [
-    ("What is the capital of France?", "The capital of France is Paris.", 0.08),
-    ("What is the capital of Japan?", "The capital of Japan is Tokyo.", 0.08),
+    ("Name Portugal's capital city.", "The capital of Portugal is Lisbon.", 0.08),
+    ("Name the city that serves as Japan's capital.", "The capital of Japan is Tokyo.", 0.08),
     ("Who wrote Romeo and Juliet?", "Romeo and Juliet was written by William Shakespeare.", 0.10),
     ("What is the boiling point of water in Celsius?", "Water boils at 100 degrees Celsius at sea level.", 0.10),
     ("What year did World War II end?", "World War II ended in 1945.", 0.10),
@@ -69,9 +69,9 @@ CHEAP_EXAMPLES: list[tuple[str, str, float]] = [
 
 MEDIUM_EXAMPLES: list[tuple[str, str, float]] = [
     (
-        "Fix the off-by-one bug: for i in range(1, n): print(arr[i])",
-        "Change the loop to `for i in range(0, n):` so index 0 is included and "
-        "the last valid index n-1 is not skipped.",
+        "This loop raises IndexError for an array of length n: for i in range(0, n+1): print(arr[i]). Repair its upper bound.",
+        "Change the loop to `for i in range(0, n):` so the loop ends at n-1 "
+        "and never accesses the out-of-bounds index n.",
         0.40,
     ),
     (
@@ -80,8 +80,8 @@ MEDIUM_EXAMPLES: list[tuple[str, str, float]] = [
         0.42,
     ),
     (
-        "Write a SQL query to find the second-highest salary from an employees table.",
-        "SELECT MAX(salary) FROM employees WHERE salary < (SELECT MAX(salary) FROM employees);",
+        "Return the third-highest distinct order total from orders using SQL.",
+        "SELECT DISTINCT total FROM orders WHERE total IS NOT NULL ORDER BY total DESC LIMIT 1 OFFSET 2;",
         0.45,
     ),
     (
@@ -120,20 +120,19 @@ MEDIUM_EXAMPLES: list[tuple[str, str, float]] = [
 
 FRONTIER_EXAMPLES: list[tuple[str, str, float]] = [
     (
-        "Prove that the square root of 2 is irrational.",
-        "Assume sqrt(2) = a/b in lowest terms. Then a^2 = 2b^2, so a^2 is even, "
-        "so a is even; write a=2k, giving 4k^2=2b^2, so b^2=2k^2, so b is also "
-        "even -- contradicting a/b being in lowest terms. Hence sqrt(2) is irrational.",
+        "Prove that there are infinitely many prime numbers.",
+        "Suppose all primes are p1 through pk. The integer p1*...*pk + 1 "
+        "is greater than 1 and has a prime divisor, but none of the listed "
+        "primes divides it. This contradicts the list being complete.",
         0.78,
     ),
     (
-        "Plan a 3-step migration strategy from a monolith to microservices, "
-        "considering data consistency risks.",
-        "1) Identify a bounded context and extract it behind a strangler-fig "
-        "facade while keeping the shared DB temporarily. 2) Introduce an "
-        "outbox/event log for cross-service writes to avoid dual-write "
-        "inconsistency. 3) Cut the extracted service over to its own datastore "
-        "with a rollback plan and dark-launch traffic shadowing before full cutover.",
+        "Plan a 3-step strategy for splitting a shared database between two teams, "
+        "considering write contention.",
+        "1) Map table ownership and transactions crossing team boundaries. "
+        "2) Assign one writer per entity and route other writes through its API "
+        "to remove contention. 3) Backfill separate stores and replicate changes "
+        "with an outbox; validate consistency before cutting over with rollback.",
         0.82,
     ),
     (

@@ -1,0 +1,4 @@
+language = "typescript"
+neighborhood = "data structure"
+entrypoint = "LRUCache"
+difficulty = 0.8

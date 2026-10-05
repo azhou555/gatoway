@@ -1,0 +1,4 @@
+language = "design"
+neighborhood = "architecture"
+entrypoint = ""
+rubric = ["Defines responsibilities for order, inventory, payment, and shipping services.", "Uses an outbox or equivalent atomic state-and-event publication.", "Makes consumers idempotent for at-least-once delivery.", "Explains ordering or version checks for events belonging to the same order.", "Specifies compensation for payment or inventory failure and recovery visibility."]

@@ -1,0 +1,3 @@
+language = "typescript"
+neighborhood = "stack"
+entrypoint = "dailyTemperatures"

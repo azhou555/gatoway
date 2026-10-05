@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { longestUnique } from './solution.ts';
+test('case 0', () => assert.deepEqual(longestUnique(...["abcabcbb"] as any), 3));
+test('case 1', () => assert.deepEqual(longestUnique(...["bbbbb"] as any), 1));
+test('case 2', () => assert.deepEqual(longestUnique(...["pwwkew"] as any), 3));
+test('case 3', () => assert.deepEqual(longestUnique(...[""] as any), 0));
+test('case 4', () => assert.deepEqual(longestUnique(...["\ud83d\ude00a\ud83d\ude00b"] as any), 3));
+test('case 5', () => assert.deepEqual(longestUnique(...["abba"] as any), 2));
+test('case 6', () => assert.deepEqual(longestUnique(...["\ud83d\ude00\ud83d\ude03"] as any), 2));

@@ -1,0 +1,2 @@
+Export class TimeMap with constructor(), set(key: string, value: string, timestamp: number): void and get(key: string, timestamp: number): string | undefined. Set timestamps are nondecreasing per key. Get returns the value at the largest timestamp <= query, or undefined. A repeated set at the same timestamp replaces its value. Reads may arrive in any time order.
+Return a single fenced typescript code block, with no dependencies.

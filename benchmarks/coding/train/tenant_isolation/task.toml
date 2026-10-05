@@ -1,0 +1,4 @@
+language = "design"
+neighborhood = "architecture"
+entrypoint = ""
+rubric = ["Derives tenant identity from authenticated context rather than caller-supplied IDs.", "Enforces tenant boundaries at database or repository level.", "Includes tenant scope in cache keys and background jobs.", "Provides a migration route to dedicated storage with consistency checks.", "Describes tenant-scoped backup/restore or tests for cross-tenant leaks."]

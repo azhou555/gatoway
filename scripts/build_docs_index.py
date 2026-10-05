@@ -41,6 +41,14 @@ INDEX: dict[str, list[tuple[str, str, str, str | None]]] = {
         ("policy_comparison.md", "current",
          "Protocol and limitations for policy_results.md (hand-written).",
          None),
+        ("downgrade_probe_results.md", "current",
+         "Fresh-task validation of the strict_evidence downgrades; "
+         "fence-normalization re-grading (hand-written verdict).", None),
+        ("policy_results_probe.md", "generated",
+         "Raw probe-run output; superseded by downgrade_probe_results.md "
+         "(its probe-group scores are pre-fence-normalization).",
+         ".venv/bin/python scripts/report_policy_eval.py "
+         "artifacts/policy_eval_probe_20261005 --output docs/policy_results_probe.md"),
     ],
     "Cost": [
         ("openrouter_cost_comparison.md", "current",

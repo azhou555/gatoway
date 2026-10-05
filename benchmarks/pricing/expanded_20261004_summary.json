@@ -1,0 +1,32 @@
+{
+  "basis": "openrouter_uncached_text_list_price_estimate",
+  "retrieved_at": "2026-10-04T06:02:58.323436+00:00",
+  "evaluation_signature": "05acaf31e48af0e40bdccdafa0f3fdd36f7100143f8ec375561ffd9a823d0d47",
+  "coverage": {
+    "router": 96,
+    "baseline": 96,
+    "baseline_priced": 96,
+    "router_priced": 54
+  },
+  "unpriced_answers": {
+    "openai/gemma-small": 42
+  },
+  "full_comparison_available": false,
+  "full_reduction_percent": null,
+  "known_subtotals_usd": {
+    "router": "0.053461079",
+    "baseline": "0.1462694940"
+  },
+  "matched_pairs": 54,
+  "matched_pair_usd": {
+    "router": "0.053461079",
+    "baseline": "0.0717491780"
+  },
+  "matched_pair_reduction_percent": 25.488931733824185,
+  "snapshot_sha256": "c20d2638e439863f46e23f6ac94bf3423e60e6993916f147ec84f49434a4114c",
+  "checkpoint_sha256": {
+    "artifacts/expanded_eval_v2_20261003/eval_partial_1.json": "12a21a66883a506302024283887ed358d7b4419ab48ca155fc294d4d16707224",
+    "artifacts/expanded_eval_v2_20261003/eval_partial_2.json": "51093d580cc93d51ab602349d994d091990ad9403648a1a97f79335d154c7ed4",
+    "artifacts/expanded_eval_v2_20261003/eval_partial_3.json": "34430086f6a91af091ba46eae6ba0d35ae782b35dcc772143b8054c744ca466b"
+  }
+}

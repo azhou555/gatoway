@@ -1,0 +1,326 @@
+[
+ {
+  "task_id": "probe_codefix_00",
+  "suite": "probe_glm5",
+  "prompt": "This loop is meant to print every element of arr except the last, one per line: for i in range(n): print(arr[i]), where n=len(arr). It has an off-by-one bug. After fixing it, for arr=[10, 20, 30, 40] list the values printed in order. Respond with only JSON: {\"result\": [<numbers>]} (empty list if nothing prints).",
+  "answer": {
+   "result": [
+    10,
+    20,
+    30
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_01",
+  "suite": "probe_glm5",
+  "prompt": "Repair the off-by-one bug in this single loop so it prints each element except the last, one per line: for i in range(n): print(arr[i]) with n=len(arr). For arr=[7], what values are printed in order? Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": []
+  }
+ },
+ {
+  "task_id": "probe_codefix_02",
+  "suite": "probe_glm5",
+  "prompt": "The loop for i in range(n): print(arr[i]) (n=len(arr)) should print every element of arr except the last one. Fix the off-by-one error, then for arr=[] give the printed values in order. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": []
+  }
+ },
+ {
+  "task_id": "probe_codefix_03",
+  "suite": "probe_glm5",
+  "prompt": "This loop is meant to print every element of arr except the last, one per line: for i in range(n): print(arr[i]), where n=len(arr). It has an off-by-one bug. After fixing it, for arr=[5, 5, 5] list the values printed in order. Respond with only JSON: {\"result\": [<numbers>]} (empty list if nothing prints).",
+  "answer": {
+   "result": [
+    5,
+    5
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_04",
+  "suite": "probe_glm5",
+  "prompt": "Repair the off-by-one bug in this single loop so it prints each element except the last, one per line: for i in range(n): print(arr[i]) with n=len(arr). For arr=[1, 2], what values are printed in order? Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    1
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_05",
+  "suite": "probe_glm5",
+  "prompt": "The loop for i in range(n): print(arr[i]) (n=len(arr)) should print every element of arr except the last one. Fix the off-by-one error, then for arr=[9, 8, 7, 6, 5] give the printed values in order. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    9,
+    8,
+    7,
+    6
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_06",
+  "suite": "probe_glm5",
+  "prompt": "This loop is meant to print every element of arr except the last, one per line: for i in range(n): print(arr[i]), where n=len(arr). It has an off-by-one bug. After fixing it, for arr=[0, 0] list the values printed in order. Respond with only JSON: {\"result\": [<numbers>]} (empty list if nothing prints).",
+  "answer": {
+   "result": [
+    0
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_07",
+  "suite": "probe_glm5",
+  "prompt": "Repair the off-by-one bug in this single loop so it prints each element except the last, one per line: for i in range(n): print(arr[i]) with n=len(arr). For arr=[100, 200, 300], what values are printed in order? Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    100,
+    200
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_08",
+  "suite": "probe_glm5",
+  "prompt": "The loop for i in range(n): print(arr[i]) (n=len(arr)) should print every element of arr except the last one. Fix the off-by-one error, then for arr=[3, 1, 4, 1, 5, 9] give the printed values in order. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    3,
+    1,
+    4,
+    1,
+    5
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_09",
+  "suite": "probe_glm5",
+  "prompt": "This loop is meant to print every element of arr except the last, one per line: for i in range(n): print(arr[i]), where n=len(arr). It has an off-by-one bug. After fixing it, for arr=[42, 42] list the values printed in order. Respond with only JSON: {\"result\": [<numbers>]} (empty list if nothing prints).",
+  "answer": {
+   "result": [
+    42
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_10",
+  "suite": "probe_glm5",
+  "prompt": "Repair the off-by-one bug in this single loop so it prints each element except the last, one per line: for i in range(n): print(arr[i]) with n=len(arr). For arr=[11, 22, 33, 44, 55, 66], what values are printed in order? Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    11,
+    22,
+    33,
+    44,
+    55
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_11",
+  "suite": "probe_glm5",
+  "prompt": "The loop for i in range(n): print(arr[i]) (n=len(arr)) should print every element of arr except the last one. Fix the off-by-one error, then for arr=[8] give the printed values in order. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": []
+  }
+ },
+ {
+  "task_id": "probe_codefix_12",
+  "suite": "probe_glm5",
+  "prompt": "This loop is meant to print every element of arr except the last, one per line: for i in range(n): print(arr[i]), where n=len(arr). It has an off-by-one bug. After fixing it, for arr=[2, 4, 6, 8, 10, 12, 14] list the values printed in order. Respond with only JSON: {\"result\": [<numbers>]} (empty list if nothing prints).",
+  "answer": {
+   "result": [
+    2,
+    4,
+    6,
+    8,
+    10,
+    12
+   ]
+  }
+ },
+ {
+  "task_id": "probe_codefix_13",
+  "suite": "probe_glm5",
+  "prompt": "Repair the off-by-one bug in this single loop so it prints each element except the last, one per line: for i in range(n): print(arr[i]) with n=len(arr). For arr=[1], what values are printed in order? Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": []
+  }
+ },
+ {
+  "task_id": "probe_codefix_14",
+  "suite": "probe_glm5",
+  "prompt": "The loop for i in range(n): print(arr[i]) (n=len(arr)) should print every element of arr except the last one. Fix the off-by-one error, then for arr=[13, 21, 34, 55] give the printed values in order. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    13,
+    21,
+    34
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_00",
+  "suite": "probe_gemma",
+  "prompt": "Using SQL over employees(id, name, salary) with salary values [50, 90, 90, 70, 60], return the two largest DISTINCT salary amounts in descending order. Return the available amounts when fewer than two distinct values exist. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    90,
+    70
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_01",
+  "suite": "probe_gemma",
+  "prompt": "Write the result of a SQL query over employees(id, name, salary) that selects the two largest distinct salaries in descending order, given salaries [42]. When fewer than two distinct salaries exist, return those available. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    42
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_02",
+  "suite": "probe_gemma",
+  "prompt": "From an employees(id, name, salary) table whose salary column holds [30, 30, 30], return the two highest distinct salaries ordered high to low, using SQL. Fewer than two distinct values returns the available amounts. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    30
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_03",
+  "suite": "probe_gemma",
+  "prompt": "Using SQL over employees(id, name, salary) with salary values [100, 200], return the two largest DISTINCT salary amounts in descending order. Return the available amounts when fewer than two distinct values exist. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    200,
+    100
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_04",
+  "suite": "probe_gemma",
+  "prompt": "Write the result of a SQL query over employees(id, name, salary) that selects the two largest distinct salaries in descending order, given salaries [75, 75, 80, 80, 65]. When fewer than two distinct salaries exist, return those available. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    80,
+    75
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_05",
+  "suite": "probe_gemma",
+  "prompt": "From an employees(id, name, salary) table whose salary column holds [10, 20, 30, 40, 50], return the two highest distinct salaries ordered high to low, using SQL. Fewer than two distinct values returns the available amounts. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    50,
+    40
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_06",
+  "suite": "probe_gemma",
+  "prompt": "Using SQL over employees(id, name, salary) with salary values [500], return the two largest DISTINCT salary amounts in descending order. Return the available amounts when fewer than two distinct values exist. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    500
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_07",
+  "suite": "probe_gemma",
+  "prompt": "Write the result of a SQL query over employees(id, name, salary) that selects the two largest distinct salaries in descending order, given salaries [88, 88, 88, 99]. When fewer than two distinct salaries exist, return those available. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    99,
+    88
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_08",
+  "suite": "probe_gemma",
+  "prompt": "From an employees(id, name, salary) table whose salary column holds [12, 45, 45, 67, 89, 89], return the two highest distinct salaries ordered high to low, using SQL. Fewer than two distinct values returns the available amounts. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    89,
+    67
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_09",
+  "suite": "probe_gemma",
+  "prompt": "Using SQL over employees(id, name, salary) with salary values [7, 7], return the two largest DISTINCT salary amounts in descending order. Return the available amounts when fewer than two distinct values exist. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    7
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_10",
+  "suite": "probe_gemma",
+  "prompt": "Write the result of a SQL query over employees(id, name, salary) that selects the two largest distinct salaries in descending order, given salaries [60, 55, 70, 65]. When fewer than two distinct salaries exist, return those available. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    70,
+    65
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_11",
+  "suite": "probe_gemma",
+  "prompt": "From an employees(id, name, salary) table whose salary column holds [1000, 2000, 1500], return the two highest distinct salaries ordered high to low, using SQL. Fewer than two distinct values returns the available amounts. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    2000,
+    1500
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_12",
+  "suite": "probe_gemma",
+  "prompt": "Using SQL over employees(id, name, salary) with salary values [33], return the two largest DISTINCT salary amounts in descending order. Return the available amounts when fewer than two distinct values exist. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    33
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_13",
+  "suite": "probe_gemma",
+  "prompt": "Write the result of a SQL query over employees(id, name, salary) that selects the two largest distinct salaries in descending order, given salaries [41, 41, 52, 63, 63, 74]. When fewer than two distinct salaries exist, return those available. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    74,
+    63
+   ]
+  }
+ },
+ {
+  "task_id": "probe_sql_14",
+  "suite": "probe_gemma",
+  "prompt": "From an employees(id, name, salary) table whose salary column holds [9, 8, 7, 6], return the two highest distinct salaries ordered high to low, using SQL. Fewer than two distinct values returns the available amounts. Respond with only JSON: {\"result\": [<numbers>]}.",
+  "answer": {
+   "result": [
+    9,
+    8
+   ]
+  }
+ }
+]

@@ -7,6 +7,8 @@ signals — instead of static per-request rules.
 
 Full architecture: `docs/spec.md`. Subtask breakdown: `docs/tasks.md`.
 Design docs and implementation plans live in `docs/specs/` and `docs/plans/`.
+All reports are indexed in [docs/INDEX.md](docs/INDEX.md), which lists each
+one's status and how to regenerate it.
 
 ## Status
 

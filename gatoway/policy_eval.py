@@ -28,6 +28,10 @@ from gatoway.session import compute_threshold
 
 def tasks():
     result = benchmark_tasks('expanded')
+    # Held-out REST-scaffold split (suite="scaffold"): measured this cycle but
+    # reported in its own group so the headline existing/holdout deltas are
+    # unchanged. These are code_tests/llm_judge, not json_exact.
+    result += benchmark_tasks('scaffold')
     for name in ('policy_holdout.json', 'downgrade_probes.json'):
         for item in json.loads(Path('benchmarks/breadth', name).read_text()):
             result.append(BenchmarkTask(task_id=item['task_id'], prompt=item['prompt'],
@@ -94,6 +98,7 @@ def summarize(manifest, state):
         return outcome['score']
     for name, suites in [('all', None), ('existing', {'original','coding','structured','reasoning'}),
                           ('holdout', {'holdout_structured','holdout_reasoning'}),
+                          ('scaffold', {'scaffold'}),
                           ('probe', {'probe_glm5','probe_gemma'})]:
         group = {}
         for policy in POLICIES:

@@ -26,7 +26,19 @@ def assert_no_eval_overlap(prompts: Iterable[str | PromptRecord]) -> None:
     Accept raw strings or corpus records exposing ``prompt``. Report every
     collision so a corpus edit can fix all offending pairs at once.
     """
+    import json
     from gatoway.eval import benchmark_tasks
+
+    # Every held-out prompt a train prompt must not duplicate: the expanded eval
+    # suite plus the policy holdout, which lives only in JSON and is otherwise
+    # outside the guard (read directly to keep it litellm-free). The downgrade
+    # probes are deliberately excluded -- they themselves run through this guard,
+    # and train-vs-probe leakage has its own test (test_downgrade_probes.py).
+    targets = [(t.task_id, t.prompt) for t in benchmark_tasks("expanded")]
+    holdout = Path("benchmarks/breadth/policy_holdout.json")
+    if holdout.exists():
+        targets += [(item["task_id"], item["prompt"])
+                    for item in json.loads(holdout.read_text())]
 
     # ponytail: character similarity catches copied/reworded text, not semantic
     # equivalence; add task-specific semantic checks as the corpus expands.
@@ -34,14 +46,14 @@ def assert_no_eval_overlap(prompts: Iterable[str | PromptRecord]) -> None:
     for item in prompts:
         prompt = item if isinstance(item, str) else item.prompt
         normalized = " ".join(prompt.casefold().split())
-        for task in benchmark_tasks("expanded"):
-            target = " ".join(task.prompt.casefold().split())
+        for task_id, target_prompt in targets:
+            target = " ".join(target_prompt.casefold().split())
             ratio = SequenceMatcher(None, normalized, target).ratio()
             if normalized == target or ratio >= 0.85:
                 kind = "exact match" if normalized == target else "near match"
                 collisions.append(
-                    f"{kind}: {prompt!r} overlaps {task.task_id} "
-                    f"({task.prompt!r}); ratio={ratio:.3f}"
+                    f"{kind}: {prompt!r} overlaps {task_id} "
+                    f"({target_prompt!r}); ratio={ratio:.3f}"
                 )
     if collisions:
         raise AssertionError("Eval prompt overlap:\n" + "\n".join(collisions))
@@ -58,6 +70,7 @@ class TrainPrompt:
     neighborhood: str
     reference_response: str
     execution_fixtures: tuple[tuple[list[int], list[tuple[object, ...]]], ...] | None = None
+    expected_json: object = None  # structured/reasoning json_exact answer; keyword-only in practice
     split: str = "train"
     rubric: list[str] = field(default_factory=list)
     task_dir: Path | None = None
@@ -235,6 +248,12 @@ async def score(task, response: str, answer_model: str, *, dry_run: bool = False
     """Shared live scorer for evaluation and measured bank bootstrap."""
     import asyncio
     from gatoway.eval import score_task
+    if task.scoring_method == "json_exact":
+        # Fence-tolerant in the bank: the serving path unwraps fenced JSON
+        # (app.unwrap_fenced_json), so routing should credit capability, not
+        # penalize a ```json wrapper. Deterministic, so dry_run shares it.
+        from gatoway.breadth_tasks import score_json_normalized
+        return score_json_normalized(response, task.expected_json)
     if task.scoring_method == "llm_judge" and not dry_run:
         from gatoway.judge import judge
         return await judge(task.prompt, response, task.rubric, answer_model)

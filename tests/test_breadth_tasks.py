@@ -12,7 +12,11 @@ from gatoway.bank_corpus import TRAIN_PROMPTS, assert_no_eval_overlap, score
 async def test_gold_and_wrong_answers(case):
     task = next(t for t in benchmark_tasks('expanded') if t.task_id == case['task_id'])
     assert await score(task, json.dumps(case['answer']), 'unused') == 1
-    for wrong in ['null', 'true', '{}', '[]', 'I cannot answer.', '```json\n'+json.dumps(case['answer'])+'\n```']:
+    # Bank json_exact scoring is fence-tolerant (score_json_normalized): a correct
+    # answer wrapped in a ```json fence is a capability hit the serving path
+    # unwraps, so the bank credits it. Strict-vs-normalized is tested separately.
+    assert await score(task, '```json\n'+json.dumps(case['answer'])+'\n```', 'unused') == 1
+    for wrong in ['null', 'true', '{}', '[]', 'I cannot answer.']:
         assert await score(task, wrong, 'unused') == 0
 
 

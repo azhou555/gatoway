@@ -7,7 +7,7 @@ from gatoway.eval import BENCHMARK_TASKS, score_task
 
 
 def test_corpus_structure_and_separation():
-    assert len(TRAIN_PROMPTS) == 82
+    assert len(TRAIN_PROMPTS) == 88
     ids = [task.prompt_id for task in TRAIN_PROMPTS]
     assert len(set(ids)) == len(ids)
     assert set(ids).isdisjoint(task.task_id for task in BENCHMARK_TASKS)
@@ -25,6 +25,8 @@ def test_corpus_structure_and_separation():
         "selection optimization": 4, "boundary reasoning": 4,
         "logical inference": 3, "grounded abstention": 3,
         "long-context retrieval": 4,
+        # REST-scaffold train tasks (executable, single-file WSGI)
+        "rest scaffolding": 6,
     }
     assert_no_eval_overlap(TRAIN_PROMPTS)
     for task in TRAIN_PROMPTS:

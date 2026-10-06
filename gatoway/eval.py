@@ -235,16 +235,23 @@ for _task in BENCHMARK_TASKS:
     _task.rubric = RUBRICS.get(_task.task_id, [])
     _task.reference_response = _task.canned_responses["frontier"]
 
+# REST-scaffold eval tasks are held out in their own suite so the headline
+# comparison stays on the unchanged original/coding/structured/reasoning suites;
+# benchmark_tasks("scaffold") exposes them for a separate report.
+SCAFFOLD_EVAL_TASKS: list["BenchmarkTask"] = []
+
 for _artifact in load_tasks("eval"):
     _reference = fenced_reference(_artifact)
     _low = ("No detailed proposal." if _artifact.language == "design" else
             chr(96) * 3 + _artifact.language + "\n// incomplete answer\n" + chr(96) * 3)
-    BENCHMARK_TASKS.append(BenchmarkTask(
+    _scaffold = _artifact.neighborhood == "rest scaffolding"
+    (SCAFFOLD_EVAL_TASKS if _scaffold else BENCHMARK_TASKS).append(BenchmarkTask(
         task_id=_artifact.task_id, prompt=_artifact.prompt,
         scoring_method="llm_judge" if _artifact.language == "design" else "code_tests",
         expected=[], difficulty=_artifact.difficulty,
         canned_responses={"cheap": _low, "medium": _reference, "frontier": _reference},
-        suite="coding", rubric=_artifact.rubric, task_dir=_artifact.directory,
+        suite="scaffold" if _scaffold else "coding",
+        rubric=_artifact.rubric, task_dir=_artifact.directory,
         language=_artifact.language, reference_response=_reference,
     ))
 
@@ -253,6 +260,8 @@ def benchmark_tasks(suite: str = "legacy") -> list[BenchmarkTask]:
     """Keep the historical suite stable; breadth is an explicit new baseline."""
     if suite == "legacy":
         return list(BENCHMARK_TASKS)
+    if suite == "scaffold":
+        return list(SCAFFOLD_EVAL_TASKS)
     if suite != "expanded":
         raise ValueError(f"unknown suite: {suite}")
     import json

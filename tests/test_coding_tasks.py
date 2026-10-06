@@ -58,7 +58,7 @@ def test_cross_split_references_fail_after_entrypoint_rebind(tmp_path, source, t
 
 
 def test_artifact_metadata_and_rubrics():
-    assert len(TASKS) == 24
+    assert len(TASKS) == 33  # 24 algorithmic/design + 9 REST-scaffold (6 train, 3 eval)
     assert len({task.task_id for task in TASKS}) == len(TASKS)
     for task in TASKS:
         if task.language == "design":

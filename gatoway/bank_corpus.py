@@ -242,6 +242,22 @@ for artifact in load_tasks("train"):
         task_dir=artifact.directory, language=artifact.language,
     ))
 
+# Structured/reasoning json_exact prompts (the families the bank lacked). The
+# reference_response is the canonical JSON so the dry run and the eval-overlap
+# guard see the same bytes a correct model would emit.
+import json as _json_mod  # noqa: E402
+
+from gatoway.bank_json_tasks import JSON_TRAIN_RECORDS  # noqa: E402
+
+for _record in JSON_TRAIN_RECORDS:
+    TRAIN_PROMPTS.append(TrainPrompt(
+        prompt_id=_record["prompt_id"], prompt=_record["prompt"],
+        scoring_method="json_exact", expected=[],
+        neighborhood=_record["neighborhood"],
+        reference_response=_json_mod.dumps(_record["expected_json"], ensure_ascii=False),
+        expected_json=_record["expected_json"],
+    ))
+
 
 async def score(task, response: str, answer_model: str, *, dry_run: bool = False,
                 grader=None) -> float:

@@ -1,0 +1,62 @@
+=== instance-identity check (answer equality / full numeric overlap) ===
+  (clean)
+
+embedding train prompts...
+calibrated near-twin ceiling (bank precedent) = 0.928
+
+46 new / 82 train prompts; 48 targets
+
+task_id                      suite       nbrs>=.4(top5)  max_new flags
+------------------------------------------------------------------------------
+capital_france               original                 1    0.044  
+arithmetic                   original                 2    0.242  
+unit_conversion              original                 2    0.253  
+quadratic_roots              original                 2    0.113  
+code_fix                     original                 3    0.254  
+sql_query                    original                 3    0.307  
+multistep_planning           original                 2    0.045  
+hard_math_proof              original                 0    0.111  
+auth_extraction              coding                   0    0.156  
+grid_shortest_path           coding                   2    0.293  
+longest_unique               coding                   5    0.328  
+lru_ttl                      coding                   5    0.316  
+merge_intervals              coding                   2    0.353  
+two_sum_pairs                coding                   2    0.377  
+url_shortener                coding                   2    0.265  
+valid_parentheses            coding                   4    0.395  
+invoice_extraction           structured               5    0.601  
+missing_fields               structured               5    0.707  
+injected_document            structured               5    0.516  
+latest_status                structured               5    0.645  
+stable_dedup                 structured               5    0.696  
+aggregate_events             structured               5    0.538  
+priority_classification      structured               5    0.521  
+exact_output_contract        structured               5    0.690  
+discount_tax                 reasoning                5    0.667  
+weighted_average             reasoning                4    0.544  
+schedule_constraints         reasoning                5    0.700  
+capacity_planning            reasoning                5    0.838  
+interval_boundaries          reasoning                5    0.524  
+logic_entailment             reasoning                3    0.701  
+answerability                reasoning                4    0.508  
+long_context_override        reasoning                3    0.522  
+holdout_refund               holdout                  5    0.595  
+holdout_null                 holdout                  4    0.504  
+holdout_log                  holdout                  5    0.601  
+holdout_untrusted            holdout                  5    0.684  
+holdout_csv                  holdout                  5    0.542  
+holdout_filter               holdout                  5    0.716  
+holdout_override             holdout                  0    0.355  (starved-ok)
+holdout_ties                 holdout                  5    0.746  
+holdout_selection            holdout                  5    0.826  
+holdout_conditional          holdout                  3    0.464  
+holdout_calendar             holdout                  5    0.602  
+holdout_probability          holdout                  0    0.395  (starved-ok)
+holdout_inclusion            holdout                  4    0.518  
+holdout_rate                 holdout                  5    0.495  
+holdout_dependency           holdout                  5    0.668  
+holdout_rounding             holdout                  5    0.667  
+
+regression preview (new prompts entering original/coding neighbor sets):
+
+GATE PASS

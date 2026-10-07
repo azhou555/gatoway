@@ -25,6 +25,7 @@ Each record is a dict; ``bank_corpus`` builds the frozen ``TrainPrompt`` from it
 from __future__ import annotations
 
 import itertools
+from fractions import Fraction
 
 
 def _R(prompt_id: str, neighborhood: str, prompt: str, expected_json) -> dict:
@@ -222,6 +223,30 @@ def _records() -> list[dict]:
         "A value rose from 800 to 1000. Return the percent increase as an integer "
         "in {\"percent\": <integer>}. " + _JSON_ONLY,
         {"percent": (1000 - 800) * 100 // 800}))
+    # harder compound chains (order/exclusion trap) -- gemma-small misses these
+    # while qwen3-small+ pass, so the bank learns the cheapest rung's ceiling here
+    # instead of teaching "gemma handles all arithmetic" (Phase 4 regression fix).
+    R.append(_R("fee_then_tax", "multi-step arithmetic",
+        "An order subtotal is 5000 cents. First add a flat 300-cent handling fee, "
+        "then charge 9% tax on the combined amount (subtotal plus fee), flooring to "
+        "whole cents. Return {\"total_cents\": <integer>}. " + _JSON_ONLY,
+        {"total_cents": (5000 + 300) * 109 // 100}))
+    R.append(_R("partial_taxable", "multi-step arithmetic",
+        "An order subtotal is 4000 cents, of which a 500-cent gift-card charge is "
+        "NOT taxable. Charge 8% tax only on the taxable remainder, then add it back. "
+        "Return the order total in whole cents as {\"total_cents\": <integer>}. "
+        + _JSON_ONLY, {"total_cents": 4000 + (4000 - 500) * 8 // 100}))
+    R.append(_R("coupon_after_tax", "multi-step arithmetic",
+        "A subtotal of 5000 cents is taxed at 8%, and only then a flat 400-cent "
+        "coupon is subtracted from the taxed amount. Return the final charge in "
+        "whole cents as {\"final_cents\": <integer>}. " + _JSON_ONLY,
+        {"final_cents": 5000 * 108 // 100 - 400}))
+    R.append(_R("installment_interest", "multi-step arithmetic",
+        "A 9000-cent balance is paid in 3 equal installments, but a one-time 4% "
+        "finance fee on the full balance is added first. Return the size of each "
+        "installment in whole cents (integer division) as {\"each_cents\": "
+        "<integer>}. " + _JSON_ONLY,
+        {"each_cents": (9000 + 9000 * 4 // 100) // 3}))
 
     # --- constraint solving (unique-solution ordering) ---
     order = [list(p) for p in itertools.permutations("WXYZ")
@@ -339,6 +364,46 @@ def _records() -> list[dict]:
         "and headcount.\" Question: \"What was the profit?\" If the passage does "
         "not contain the answer, return {\"answer\": null}; otherwise return "
         "{\"answer\": <value>}. " + _JSON_ONLY, {"answer": None}))
+    # --- probability as reduced fraction (complement / at-least-one reasoning) ---
+    # NEW family: the bank had zero probability coverage, so holdout_probability's
+    # nearest neighbors were distant non-probability prompts the cheap rung passes.
+    # These are gemma-small misses (complement reasoning) -> teach the boundary.
+    def _frac(n, d):
+        f = Fraction(n, d)
+        return {"numerator": f.numerator, "denominator": f.denominator}
+    R.append(_R("prob_at_least_one_six", "probability",
+        "Two fair six-sided dice are rolled. What is the probability that at least "
+        "one shows a six? Return a reduced fraction as {\"numerator\": <integer>, "
+        "\"denominator\": <integer>}. " + _JSON_ONLY, _frac(11, 36)))
+    R.append(_R("prob_at_least_one_head", "probability",
+        "Three fair coins are flipped. What is the probability of getting at least "
+        "one head? Return a reduced fraction as {\"numerator\": <integer>, "
+        "\"denominator\": <integer>}. " + _JSON_ONLY, _frac(7, 8)))
+    R.append(_R("prob_at_least_one_win", "probability",
+        "A game is won with probability 1/3 each play, independently. Played 3 "
+        "times, what is the probability of at least one win? Return a reduced "
+        "fraction as {\"numerator\": <integer>, \"denominator\": <integer>}. "
+        + _JSON_ONLY, _frac(19, 27)))
+
+    # --- set reasoning: inclusion-exclusion over three sets (NEW family) ---
+    R.append(_R("three_set_union", "set reasoning",
+        "In a class, 20 take math, 15 take physics, 12 take chemistry; 7 take math "
+        "and physics, 5 take math and chemistry, 4 take physics and chemistry, and "
+        "2 take all three. How many take at least one of the three subjects? Return "
+        "{\"at_least_one\": <integer>}. " + _JSON_ONLY,
+        {"at_least_one": 20+15+12 - 7-5-4 + 2}))
+    R.append(_R("three_set_all_three", "set reasoning",
+        "In a class of 50 where everyone takes at least one subject: 28 take math, "
+        "26 physics, 24 chemistry; 12 take math and physics, 10 math and chemistry, "
+        "11 physics and chemistry. How many take all three? Return {\"all_three\": "
+        "<integer>}. " + _JSON_ONLY,
+        {"all_three": 50 - (28+26+24) + (12+10+11)}))
+    R.append(_R("three_set_exactly_two", "set reasoning",
+        "Among survey respondents, the pairwise overlaps are 12 (A and B), 10 (A "
+        "and C), and 11 (B and C), and 5 are in all three of A, B, C. How many are "
+        "in exactly two of the three groups? Return {\"exactly_two\": <integer>}. "
+        + _JSON_ONLY, {"exactly_two": (12+10+11) - 3*5}))
+
     # --- long-context retrieval (needle in distractor records; must OPEN like a
     # long document so the 256-token embedding window matches the eval family) ---
     R.extend(_long_lookup_records())
@@ -415,14 +480,14 @@ JSON_TRAIN_RECORDS: list[dict] = _records()
 
 
 def demo() -> None:
-    """Self-check: 40 records, unique ids, every answer is JSON-serialisable and
+    """Self-check: 56 records, unique ids, every answer is JSON-serialisable and
     scores 1.0 against the fence-tolerant bank scorer; empty string scores 0."""
     import asyncio
     import json
     from gatoway.breadth_tasks import score_json_normalized
 
     recs = JSON_TRAIN_RECORDS
-    assert len(recs) == 46, len(recs)  # 20 structured + 26 reasoning
+    assert len(recs) == 56, len(recs)  # 20 structured + 36 reasoning (+10 Phase 4)
     ids = [r["prompt_id"] for r in recs]
     assert len(set(ids)) == len(recs), "duplicate prompt_id"
     structured = sum(1 for r in recs if r["neighborhood"] in {

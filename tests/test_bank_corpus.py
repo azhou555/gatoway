@@ -7,7 +7,7 @@ from gatoway.eval import BENCHMARK_TASKS, score_task
 
 
 def test_corpus_structure_and_separation():
-    assert len(TRAIN_PROMPTS) == 88
+    assert len(TRAIN_PROMPTS) == 98
     ids = [task.prompt_id for task in TRAIN_PROMPTS]
     assert len(set(ids)) == len(ids)
     assert set(ids).isdisjoint(task.task_id for task in BENCHMARK_TASKS)
@@ -20,11 +20,12 @@ def test_corpus_structure_and_separation():
         # json_exact structured families (20)
         "field extraction": 4, "untrusted extraction": 4, "list transformation": 4,
         "record aggregation": 4, "evidence selection": 4,
-        # json_exact reasoning families (26)
-        "multi-step arithmetic": 4, "constraint solving": 4,
+        # json_exact reasoning families (36; +10 Phase 4 cheap-rung-ceiling prompts)
+        "multi-step arithmetic": 8, "constraint solving": 4,
         "selection optimization": 4, "boundary reasoning": 4,
         "logical inference": 3, "grounded abstention": 3,
         "long-context retrieval": 4,
+        "probability": 3, "set reasoning": 3,
         # REST-scaffold train tasks (executable, single-file WSGI)
         "rest scaffolding": 6,
     }
@@ -41,7 +42,7 @@ def test_corpus_structure_and_separation():
 async def test_json_exact_prompts_are_present_and_contract_holds():
     import json
     json_tasks = [t for t in TRAIN_PROMPTS if t.scoring_method == "json_exact"]
-    assert len(json_tasks) == 46  # 20 structured + 26 reasoning families
+    assert len(json_tasks) == 56  # 20 structured + 36 reasoning families
     for task in json_tasks:
         assert task.expected_json is not None or task.reference_response == "null"
         # canonical JSON and a ```json-fenced copy both score 1.0 (fence-tolerant);

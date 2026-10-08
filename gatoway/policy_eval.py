@@ -206,7 +206,7 @@ async def main(args):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--database',default='gatoway_eval_measured_20261007_p5')
+    parser.add_argument('--database',default='gatoway_eval_measured_20261008_p6')
     parser.add_argument('--prices',type=Path,default=Path('benchmarks/pricing/policy_scenario_20261004.json'))
     parser.add_argument('--runs',type=int,default=3)
     parser.add_argument('--prepare-only',action='store_true')

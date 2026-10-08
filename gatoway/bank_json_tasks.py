@@ -378,9 +378,10 @@ def _records() -> list[dict]:
         "\"all A are C\" logically valid? Return {\"valid\": true} or "
         "{\"valid\": false}. " + _JSON_ONLY, {"valid": True}))
     R.append(_R("syllogism_invalid", "logical inference",
-        "Given the premises: some A are B, and all B are C. Is the conclusion "
-        "\"all A are C\" logically valid? Return {\"valid\": true} or "
-        "{\"valid\": false}. " + _JSON_ONLY, {"valid": False}))
+        "Consider this argument: some birds are swimmers, and every swimmer is a "
+        "hunter, therefore all birds are hunters. Does the conclusion follow from "
+        "the two premises? Answer with {\"valid\": true} if the reasoning holds or "
+        "{\"valid\": false} if it does not. " + _JSON_ONLY, {"valid": False}))
     R.append(_R("syllogism_disjoint", "logical inference",
         "Given the premises: all A are B, and no B are C. Is the conclusion "
         "\"no A are C\" logically valid? Return {\"valid\": true} or "

@@ -64,6 +64,23 @@ print()
 print("embedding train prompts...")
 train_vecs = {t.prompt_id: embed(t.prompt) for t in allp}
 
+# collision check: two distinct train prompts that embed near-identically are
+# indistinguishable to the router (the MiniLM 256-tok-truncation bug that made
+# booking_by_room/booking_slots embed at distance 0). Fail the gate on it.
+COLLIDE = 0.02  # cosine distance; ties already break at ~0.02
+collisions = []
+ids = list(train_vecs)
+for i in range(len(ids)):
+    for j in range(i + 1, len(ids)):
+        d = 1 - cos(train_vecs[ids[i]], train_vecs[ids[j]])
+        if d < COLLIDE:
+            collisions.append((ids[i], ids[j], d))
+if collisions:
+    print("TRAIN-PROMPT COLLISIONS (distinct prompts, near-identical embeddings):")
+    for a, b, d in collisions:
+        print(f"  {a} <-> {b}  dist={d:.4f}")
+    raise SystemExit("GATE FAIL: colliding train prompts")
+
 # targets: expanded eval (original/coding/structured/reasoning) + holdout
 targets = [(t.task_id, t.suite, t.prompt) for t in benchmark_tasks("expanded")]
 holdout = Path("benchmarks/breadth/policy_holdout.json")

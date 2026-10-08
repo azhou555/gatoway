@@ -279,8 +279,38 @@ RUBRIC = [
 def prompt_md(spec):
     fields = ", ".join(f"`{n}` ({t})" for n, t in spec.fields.items())
     req = ", ".join(f"`{n}`" for n in spec.required)
+    # ponytail: discriminative content (the endpoint list, incl. the per-spec
+    # filter/PUT lines) goes FIRST. The generic WSGI boilerplate is ~278 tokens,
+    # and MiniLM (embeddings.py) truncates at 256 — with the boilerplate first,
+    # the one line that distinguishes a filter/PUT variant from its CRUD sibling
+    # falls past the cutoff, so the two prompts embed identically (dist 0). Lead
+    # with the endpoints and that signal survives truncation.
+    endpoints = [
+        "Endpoints (all request/response bodies are JSON):",
+        f"- `GET /{spec.resource}` — list all; `200`.",
+        f"- `POST /{spec.resource}` — create; `201` with the created object "
+        "(including its `id`); `400` if the body is not valid JSON or a required "
+        "field is missing or the wrong type.",
+        f"- `GET /{spec.resource}/<id>` — fetch one; `200`, or `404` if unknown.",
+        f"- `DELETE /{spec.resource}/<id>` — delete; `204`, or `404` if unknown.",
+    ]
+    if spec.update:
+        endpoints.append(
+            f"- `PUT /{spec.resource}/<id>` — replace the given fields of an "
+            "existing record; `200` with the updated object, `404` if unknown, "
+            "`400` on an invalid body.")
+    if spec.filt:
+        param, field, kind = spec.filt
+        how = {"ge": f"keep rows whose `{field}` is >= the integer value",
+               "eq": f"keep rows whose `{field}` equals the value exactly",
+               "contains": f"keep rows whose `{field}` contains the value as a substring"}[kind]
+        endpoints.append(
+            f"- `GET /{spec.resource}?{param}=...` — the list endpoint also accepts "
+            f"a `{param}` query parameter: {how}.")
     lines = [
         f"# {spec.resource.title()} REST API",
+        "",
+        *endpoints,
         "",
         f"Scaffold a small in-memory REST API for **{spec.resource}** as a single "
         "Python module, using only the standard library (no third-party packages).",
@@ -293,29 +323,9 @@ def prompt_md(spec):
         f"has fields: {fields}. Required on create: {req}. The server assigns an "
         "integer `id`.",
         "",
-        "Endpoints (all request/response bodies are JSON):",
-        f"- `GET /{spec.resource}` — list all; `200`.",
-        f"- `POST /{spec.resource}` — create; `201` with the created object "
-        "(including its `id`); `400` if the body is not valid JSON or a required "
-        "field is missing or the wrong type.",
-        f"- `GET /{spec.resource}/<id>` — fetch one; `200`, or `404` if unknown.",
-        f"- `DELETE /{spec.resource}/<id>` — delete; `204`, or `404` if unknown.",
+        "Respond with a single ```python code block defining the module "
+        "(including `create_app`).",
     ]
-    if spec.update:
-        lines.append(
-            f"- `PUT /{spec.resource}/<id>` — replace the given fields of an "
-            "existing record; `200` with the updated object, `404` if unknown, "
-            "`400` on an invalid body.")
-    if spec.filt:
-        param, field, kind = spec.filt
-        how = {"ge": f"keep rows whose `{field}` is >= the integer value",
-               "eq": f"keep rows whose `{field}` equals the value exactly",
-               "contains": f"keep rows whose `{field}` contains the value as a substring"}[kind]
-        lines.append(
-            f"- `GET /{spec.resource}?{param}=...` — the list endpoint also accepts "
-            f"a `{param}` query parameter: {how}.")
-    lines += ["", "Respond with a single ```python code block defining the module "
-              "(including `create_app`)."]
     return "\n".join(lines) + "\n"
 
 

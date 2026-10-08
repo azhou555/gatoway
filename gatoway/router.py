@@ -225,7 +225,7 @@ async def fetch_neighbors(vector: list[float], pool):
                    1 - (input_embedding <=> $1) AS similarity,
                    row_number() OVER (
                        PARTITION BY model_id
-                       ORDER BY input_embedding <=> $1
+                       ORDER BY input_embedding <=> $1, routing_id
                    ) AS model_neighbor_rank
             FROM decision_history
             WHERE input_embedding IS NOT NULL
@@ -236,7 +236,7 @@ async def fetch_neighbors(vector: list[float], pool):
                calculated_difficulty, similarity
         FROM ranked
         WHERE model_neighbor_rank <= $2
-        ORDER BY similarity DESC
+        ORDER BY similarity DESC, routing_id
         """,
         vector,
         NEIGHBORS_PER_MODEL,

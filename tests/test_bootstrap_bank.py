@@ -171,6 +171,38 @@ async def test_isolated_postgres_write_and_resume(monkeypatch, tmp_path, fakes):
             await admin.close()
 
 
+@pytest.mark.skipif(os.getenv("GATOWAY_DB_TESTS") != "1", reason="opt-in Postgres")
+async def test_fetch_neighbors_breaks_distance_ties_deterministically():
+    # Equidistant rows must resolve to a STABLE top-k so a bank mutation can't
+    # silently swap which tied neighbor lands in the top-5-per-model window and
+    # flip unrelated routing decisions (the contact_book/event_log churn).
+    import asyncpg
+    import uuid
+    from gatoway.router import fetch_neighbors, NEIGHBORS_PER_MODEL
+    name = "gatoway_eval_test_" + uuid.uuid4().hex[:12]
+    pool = await module.isolated_pool(name)
+    try:
+        embedding = [1.0] + [0.0] * 383
+        ids = [str(uuid.uuid4()) for _ in range(NEIGHBORS_PER_MODEL + 2)]
+        for rid in sorted(ids, reverse=True):  # insert in the "wrong" order
+            await pool.execute(
+                "INSERT INTO decision_history (routing_id, model_id, "
+                "calculated_effectiveness, input_embedding) VALUES ($1,$2,$3,$4)",
+                rid, "openai/gemma-small", 0.5, embedding,
+            )
+        first = [str(r["routing_id"]) for r in await fetch_neighbors(embedding, pool)]
+        second = [str(r["routing_id"]) for r in await fetch_neighbors(embedding, pool)]
+        assert first == second                       # stable across calls
+        assert first == sorted(ids)[:NEIGHBORS_PER_MODEL]  # smallest uuids, in order
+    finally:
+        await pool.close()
+        admin = await asyncpg.connect(module.source_database_url())
+        try:
+            await admin.execute(f'DROP DATABASE "{name}"')
+        finally:
+            await admin.close()
+
+
 async def test_judge_failure_keeps_generated_response_for_retry(monkeypatch, tmp_path, fakes):
     async def broken_judge(*args, **kwargs):
         raise RuntimeError("malformed judge response")

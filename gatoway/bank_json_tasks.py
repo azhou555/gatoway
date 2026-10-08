@@ -315,6 +315,39 @@ def _records() -> list[dict]:
         "numbers. Numbers: " + _json(nums) +
         ". Return {\"subset\": [numbers in ascending order]}. " + _JSON_ONLY,
         {"subset": subset_found}))
+    # harder 0/1-knapsack instances in NEW prose scenarios (Phase 5). The existing
+    # four prompts above are small and gemma-small solves them, so the residuals
+    # capacity_planning / holdout_selection (both knapsack, but at a size gemma
+    # misses) inherit "cheap rung is fine" from those easy neighbors and mis-route
+    # to gemma-small at 0.0. These four are probe-verified gemma-small=0 /
+    # qwen3-small=1 at temp=0, teaching the boundary -- authored in fresh scenarios
+    # (sprint/menu/hiking/invest), never by copying a holdout prompt into train.
+    R.append(_R("sprint_capacity", "selection optimization",
+        "Task A needs 6 hours for 9 points; B needs 5 for 8; C needs 4 for 7; D "
+        "needs 3 for 4. The sprint has 10 hours and each task is done at most once. "
+        "Choose tasks maximizing total points. Return {\"jobs\": sorted array of "
+        "letters, \"value\": integer}. " + _JSON_ONLY,
+        _knapsack([("A", 6, 9), ("B", 5, 8), ("C", 4, 7), ("D", 3, 4)], 10)))
+    R.append(_R("menu_prep", "selection optimization",
+        "Dish A needs 4 prep-minutes for profit 11; B needs 8 for 13; C needs 3 for "
+        "4; D needs 6 for 12. The line has 9 prep-minutes, each dish made at most "
+        "once. Maximize profit. Return {\"jobs\": sorted array of letters, "
+        "\"value\": integer}. " + _JSON_ONLY,
+        _knapsack([("A", 4, 11), ("B", 8, 13), ("C", 3, 4), ("D", 6, 12)], 9)))
+    R.append(_R("hiking_pack", "selection optimization",
+        "Gear A weighs 4 kg, usefulness 6; B weighs 3, usefulness 5; C weighs 2, "
+        "usefulness 4; D weighs 5, usefulness 8; E weighs 6, usefulness 9. The pack "
+        "carries at most 9 kg, each item once. Maximize usefulness. Return "
+        "{\"jobs\": sorted array of letters, \"value\": integer}. " + _JSON_ONLY,
+        _knapsack([("A", 4, 6), ("B", 3, 5), ("C", 2, 4),
+                   ("D", 5, 8), ("E", 6, 9)], 9)))
+    R.append(_R("invest_fund", "selection optimization",
+        "Project A costs 7 for return 13; B costs 4 for 9; C costs 7 for 6; D costs "
+        "4 for 10; E costs 6 for 13. The fund has 10 units, each project funded at "
+        "most once. Maximize total return. Return {\"jobs\": sorted array of "
+        "letters, \"value\": integer}. " + _JSON_ONLY,
+        _knapsack([("A", 7, 13), ("B", 4, 9), ("C", 7, 6),
+                   ("D", 4, 10), ("E", 6, 13)], 10)))
 
     # --- boundary reasoning (inclusive/exclusive edge arithmetic, not list ops) ---
     R.append(_R("days_both_active", "boundary reasoning",
@@ -480,14 +513,14 @@ JSON_TRAIN_RECORDS: list[dict] = _records()
 
 
 def demo() -> None:
-    """Self-check: 56 records, unique ids, every answer is JSON-serialisable and
+    """Self-check: 60 records, unique ids, every answer is JSON-serialisable and
     scores 1.0 against the fence-tolerant bank scorer; empty string scores 0."""
     import asyncio
     import json
     from gatoway.breadth_tasks import score_json_normalized
 
     recs = JSON_TRAIN_RECORDS
-    assert len(recs) == 56, len(recs)  # 20 structured + 36 reasoning (+10 Phase 4)
+    assert len(recs) == 60, len(recs)  # 20 structured + 40 reasoning (+4 Phase 5)
     ids = [r["prompt_id"] for r in recs]
     assert len(set(ids)) == len(recs), "duplicate prompt_id"
     structured = sum(1 for r in recs if r["neighborhood"] in {

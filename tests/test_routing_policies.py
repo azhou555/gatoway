@@ -52,7 +52,7 @@ def test_paired_price_rejects_individual_regret_even_if_average_ties():
 
 def test_holdout_separate_and_objectively_scored():
     all_tasks=tasks()
-    assert len({t.task_id for t in all_tasks})==78  # 48 screening + 30 downgrade probes
+    assert len({t.task_id for t in all_tasks})==81  # 51 screening + 30 downgrade probes
     held=[t for t in all_tasks if t.suite.startswith('holdout')]
     assert len(held)==16
     probes=[t for t in all_tasks if t.suite.startswith('probe_')]

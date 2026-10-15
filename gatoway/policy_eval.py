@@ -77,7 +77,7 @@ async def prepare(args):
                     estimate_tokens(task.prompt), threshold, prices) for p in POLICIES}}
         manifest = {'source_hash':source_hash(), 'bank_hash':bank_hash, 'bank_rows':len(rows),
                     'database':args.database, 'runs':args.runs, 'prices':prices,
-                    'max_tokens':8192, 'temperature':0, 'timeout_seconds':240,
+                    'max_tokens':32768, 'temperature':0, 'timeout_seconds':600,
                     'decisions':decisions,
                     'design':'Shared task/model outcomes; existing suite diagnostic, fresh objective holdout screening; no tuning on results.'}
         save_state(destination, manifest)
@@ -169,8 +169,8 @@ async def main(args):
                 if 'response' not in record:
                     started=time.monotonic()
                     response=await asyncio.wait_for(call_provider(RUNG_BY_NAME[tier].primary,
-                        [{'role':'user','content':task.prompt}],temperature=0,max_tokens=8192,
-                        allow_reasoning_fallback=False),timeout=240)
+                        [{'role':'user','content':task.prompt}],temperature=0,max_tokens=32768,
+                        allow_reasoning_fallback=False),timeout=600)
                     record['seconds']=time.monotonic()-started
                     record['response']={k:v for k,v in vars(response).items() if k not in ('raw','cost_cents')}
                     record['usd']=str(estimate_usd(record['response'],manifest['prices']))

@@ -220,7 +220,7 @@ async def chat_completions(request: ChatCompletionRequest) -> JSONResponse:
             {
                 "index": 0,
                 "message": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
+                "finish_reason": response.finish_reason or "stop",
             }
         ],
         "usage": {

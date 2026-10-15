@@ -62,6 +62,28 @@ async def test_provider_exception_skips_pair_and_does_not_invent_difficulty(monk
     assert all(row[2] is None for row in pool.rows.values())
 
 
+async def test_truncated_response_is_skipped_not_scored(monkeypatch):
+    # A finish_reason="length" generation is a fragment, not an observation:
+    # it must be rejected, never scored, so corrupt effectiveness never enters
+    # the bank.
+    scored = []
+    async def provider(model, messages, **kwargs):
+        if model == MODEL_LADDER[0].primary:
+            return ProviderResponse("partial reasoning", model, 1, 2, .1, None, "length")
+        return ProviderResponse("answer", model, 1, 2, .1, None, "stop")
+    async def score(task, response, model, **kwargs):
+        scored.append(model)
+        return 1.0
+    monkeypatch.setattr(module, "call_provider", provider)
+    monkeypatch.setattr(module, "score", score)
+    monkeypatch.setattr(module, "embed", lambda text: [1., 0.])
+    pool = Pool()
+    result = await module.bootstrap(pool, prompts=TRAIN_PROMPTS[:1])
+    assert result["written"] == 7  # 8 rungs, the truncated primary skipped
+    assert MODEL_LADDER[0].primary not in scored  # never handed to the scorer
+    assert [f["error_type"] for f in result["provider_failures"]] == ["TruncatedResponse"]
+
+
 async def test_dry_run_never_calls_provider_embedding_or_database(monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("live dependency called")

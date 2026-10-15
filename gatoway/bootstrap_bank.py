@@ -29,8 +29,15 @@ from gatoway.db import SCHEMA_PATH, _init_connection
 from gatoway.embeddings import embed
 from gatoway.providers import MODEL_LADDER, RUNG_BY_NAME, ProviderResponse, call_provider
 
-TIMEOUT_SECONDS = 120
+TIMEOUT_SECONDS = 300
 ATTEMPTS = 2
+
+# Reasoning-heavy models spend output tokens on reasoning_content before the
+# visible answer. A low ceiling truncates them mid-answer (finish_reason
+# "length"), and with reasoning fallback on, that fragment gets scored as a
+# real observation. Production routing caps nothing, so the bank gives the same
+# headroom and the observe loop rejects any response that still truncates.
+OUTPUT_TOKEN_CEILING = 32768
 DATABASE_MARKER = "gatoway measured eval bank v1"
 ROW_NAMESPACE = uuid.UUID("6b68bfd3-cbfc-473d-b4eb-e266b66cf003")
 ROOT = Path(__file__).resolve().parent
@@ -106,7 +113,7 @@ async def isolated_pool(name: str):
 
 
 def max_tokens(task):
-    return 2048 if task.task_dir is not None else 512
+    return OUTPUT_TOKEN_CEILING
 
 
 def fingerprint(task):
@@ -195,6 +202,15 @@ async def bootstrap(pool, *, prompts=None, rungs=None, dry_run=False,
                         save_state(path, state)
                 if response.model_id != rung.primary:
                     raise ValueError("bootstrap must observe the requested primary model")
+                if response.finish_reason == "length":
+                    # A truncated generation is not a valid observation: its
+                    # content is a fragment (often raw reasoning), so scoring it
+                    # fabricates effectiveness. Treat it like a provider failure.
+                    summary["provider_failures"].append(
+                        {"prompt_id": task.prompt_id, "model_id": rung.primary,
+                         "error_type": "TruncatedResponse"})
+                    print(f"  {rung.name}: skipped (truncated at length)", flush=True)
+                    return
                 value = await score(task, response.content, response.model_id, grader=grader)
                 if not math.isfinite(value) or not 0 <= value <= 1:
                     raise ValueError("scorer returned an invalid effectiveness")

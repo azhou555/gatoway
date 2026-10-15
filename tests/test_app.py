@@ -154,6 +154,35 @@ def test_happy_path_returns_200_with_gatoway_metadata(monkeypatch):
     assert "session_id" in body["gatoway"]
 
 
+def test_truncated_provider_response_surfaces_length_finish_reason(monkeypatch):
+    # The gateway must not stamp "stop" on a response the provider truncated;
+    # the caller needs to see finish_reason="length" to know it is incomplete.
+    decision = RoutingDecision(
+        tier="gemma-small", confidence=0.9, low_confidence=False,
+        calculated_difficulty=0.1, matched_routing_id=uuid.uuid4(),
+        input_embedding=FAKE_EMBEDDING,
+    )
+
+    async def fake_classify(text, pool, current_threshold):
+        return decision
+
+    async def fake_breaker_call(self, tier, messages, **kwargs):
+        resp = make_provider_response("openai/gemma-small")
+        resp.finish_reason = "length"
+        return resp
+
+    monkeypatch.setattr(app_module, "classify", fake_classify)
+    monkeypatch.setattr(app_module.CircuitBreaker, "call", fake_breaker_call)
+    monkeypatch.setattr(app_module, "breaker", app_module.CircuitBreaker())
+
+    client = TestClient(app_module.app)
+    resp = client.post("/v1/chat/completions",
+                       json={"messages": [{"role": "user", "content": "long task"}]})
+
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["finish_reason"] == "length"
+
+
 def test_classifier_failure_falls_back_to_gpt_oss_rung(monkeypatch, fake_pool):
     async def fake_classify(text, pool, current_threshold):
         raise RuntimeError("embedding service unreachable")

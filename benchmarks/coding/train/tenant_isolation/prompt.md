@@ -1,0 +1,1 @@
+Architect data isolation for a multi-tenant SaaS service that initially shares a database but may move large tenants to dedicated storage. Cover identity propagation, query enforcement, migrations, backups, and validation.

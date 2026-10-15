@@ -1,0 +1,40 @@
+ # Migrating Authentication Out of a Monolith Without Forcing a Global Logout
+
+## 1. Target Architecture
+
+```
+┌─────────────┐      ┌──────────────┐      ┌─────────────────────┐
+│   Clients   │──────▶  API Gateway │──────▶      Monolith       │
+│  (web/app)  │      │  / LB / Edge │      │  (business logic,   │
+└─────────────┘      └──────────────┘      │   authorization)    │
+        │                                  └─────────────────────┘
+        │                                            ▲
+        │                                            │ validate
+        ▼                                            │ tokens /
+┌─────────────────────────────────────┐              │ introspect
+│         Auth Service                │              │
+│  (OAuth2 / OIDC Authorization       │◀─────────────┘
+│   Server + session/token issuer)    │
+│  - credentials / MFA                │
+│  - token lifecycle                  │
+│  - JWKS / userinfo / introspection  │
+└─────────────────────────────────────┘
+```
+
+| Component | Responsibility |
+|---|---|
+| **Auth Service** | Authentication, credential verification, MFA, session/token issuance, token revocation, JWKS, userinfo. It answers **“who is this user and are their credentials valid?”** |
+| **Monolith** | Business logic and **authorization** (RBAC/ABAC). It answers **“is this user allowed to do X on this resource?”** |
+| **API Gateway / Edge** | Routes `/login`, `/logout`, `/oauth/*`, `/register` to the Auth Service; routes business API calls to the Monolith. Can also do coarse token validation. |
+
+Token choice: **JWT access tokens** (short-lived, e.g., 5–15 min) + **refresh tokens** (long-lived, rotating, stored in Auth Service). The Monolith validates JWTs locally using a cached **JWKS** from the Auth Service, or uses introspection for opaque/high-security tokens.
+
+---
+
+## 2. Phased Rollout (Strangler Fig Pattern)
+
+### Phase 0 — Build & Sync (no user impact)
+
+* Build the Auth Service behind a feature flag, not yet serving live traffic.
+* Replicate existing user credentials (hashed passwords, MFA seeds, user IDs) to the Auth Service. Use **CDC** or a one-time backfill + ongoing sync so password changes stay consistent.
+* Establish a **shared session

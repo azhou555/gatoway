@@ -1,0 +1,10 @@
+language = "python"
+neighborhood = "rest scaffolding"
+entrypoint = "create_app"
+difficulty = 0.4
+rubric = [
+  "exposes create_app() returning a fresh WSGI application",
+  "routes by method and path with correct status codes (201/204/400/404)",
+  "validates the request body and isolates per-instance state",
+  "clear structure: routing separated from handlers, no global mutable state",
+]

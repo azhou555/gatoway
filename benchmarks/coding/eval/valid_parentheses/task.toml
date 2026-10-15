@@ -1,0 +1,4 @@
+language = "typescript"
+neighborhood = "stack"
+entrypoint = "validParentheses"
+difficulty = 0.6

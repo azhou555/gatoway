@@ -440,6 +440,17 @@ start.
 
 ### 8.1 Wide-ladder gate result
 
+**Latest measured-bank follow-up (2026-10-04):** three live repetitions of
+32 tasks completed against the frozen 288-observation bank using rubric-json-v2.
+Mean cost-proxy reduction was 92.2%, but mean quality fell 3.33 points
+(89.32% versus 92.66%). Stability failed on routed code_fix, two_sum_pairs,
+and injected_document. Capacity planning also failed consistently (0/3 versus
+3/3). Objective full passes were 77/84 versus 81/84. This does not establish
+accuracy-preserving savings. The expanded task mix and new judge are a new
+baseline, not a direct comparison with the older results below. See
+[the full report](../eval_report_expanded.md), including judge retries and
+the fixed-output-budget caveat. All bank row values were unchanged.
+
 The first isolated live run on 2026-09-08 used 24 rows (three assigned to
 each rung) and repeated the eight-task session three times. Proxy-cost savings
 were effectively unchanged at 40.0%, but the effectiveness delta deteriorated
@@ -488,8 +499,13 @@ one of the verbatim leaks — so the single positive data point in this analysis
 is the least trustworthy one. The density diagnosis still holds; its supporting
 evidence is weaker than it reads.
 
-Closed by `docs/plans/2026-09-24-bank-densification.md` Task 1, which adds a
-similarity guard over the seed corpus and rewrites the colliding prompts.
+Source-corpus fix completed 2026-09-30 in
+`docs/plans/2026-09-24-bank-densification.md` Task 1. A normalized exact-match
+and `SequenceMatcher` guard (ratio < 0.85) now covers both seed sources.
+It caught a sixth collision, the Japan capital question (0.881), in addition
+to the five audited above; all six were rewritten with matching answers.
+This does not repair existing database rows or validate the historical gate.
+Task 4 rebuilds the isolated bank and repeats the gate.
 
 **Each step gets its own implementation plan.** This document is the design
 for the pivot as a whole; it is deliberately too large to implement in one

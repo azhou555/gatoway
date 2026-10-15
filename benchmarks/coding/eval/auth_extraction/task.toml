@@ -1,0 +1,5 @@
+language = "design"
+neighborhood = "architecture"
+entrypoint = ""
+difficulty = 0.8
+rubric = ["Describes incremental traffic migration with a compatibility phase.", "Preserves or exchanges existing sessions without forcing universal logout.", "Separates authentication from resource-level authorization.", "Specifies token validation and signing-key rotation or revocation.", "Gives a concrete rollback mechanism and secure outage behavior."]

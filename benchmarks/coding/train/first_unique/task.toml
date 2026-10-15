@@ -1,0 +1,3 @@
+language = "python"
+neighborhood = "hash map"
+entrypoint = "first_unique"

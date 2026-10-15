@@ -1,0 +1,5 @@
+language = "design"
+neighborhood = "system design"
+entrypoint = ""
+difficulty = 0.8
+rubric = ["Explains a collision-safe short-code allocation scheme.", "Persists a mapping from each short code to its destination with a uniqueness constraint.", "Uses caching for redirect reads and explains expiry or invalidation.", "Addresses malicious destinations or creation abuse with a concrete control.", "Explains availability during a cache or database failure."]

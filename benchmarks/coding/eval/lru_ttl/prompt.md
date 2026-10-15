@@ -1,0 +1,2 @@
+Export class LRUCache. constructor(capacity: number); put(key: string, value: number, ttl: number, now: number): void; get(key: string, now: number): number | undefined. Capacity is a nonnegative integer. Every call has nondecreasing now. Keys expire when now >= insertion time + ttl; ttl<=0 removes the key. Purge ALL expired keys before eviction. Get and overwriting a live key make it most recent; evict least recent live key at capacity. A put resets TTL. Do not use wall-clock time.
+Return a single fenced typescript code block, with no dependencies.

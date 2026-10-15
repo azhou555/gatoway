@@ -1,0 +1,4 @@
+language = "typescript"
+neighborhood = "sliding window"
+entrypoint = "longestUnique"
+difficulty = 0.6

@@ -82,7 +82,7 @@ introduced at seed time, not at write-back time.
 - Produces: `gatoway.bank_corpus.assert_no_eval_overlap(prompts)`, reused by
   Task 2's corpus test and Task 3's bootstrap entry point.
 
-- [ ] **Step 1: Write the failing test.** `tests/test_bank_leakage.py` collects
+- [x] **Step 1: Write the failing test.** `tests/test_bank_leakage.py` collects
   every prompt in `seed.CHEAP_EXAMPLES + MEDIUM_EXAMPLES + FRONTIER_EXAMPLES`
   and every prompt in `label_seed.CANDIDATE_PROMPTS`, and asserts that none
   exceeds a similarity threshold against any `BENCHMARK_TASKS` prompt. Use two
@@ -90,9 +90,9 @@ introduced at seed time, not at write-back time.
   `difflib.SequenceMatcher` ratio must stay under `0.85`. The failure message
   must name the colliding pair and its ratio, or a future regression is
   unreadable. Expect 5 failures on first run.
-- [ ] **Step 2: Verify the test fails for the right reason** — five named
+- [x] **Step 2: Verify the test fails for the right reason** — five named
   collisions, not an import error.
-- [ ] **Step 3: Rewrite the five seed prompts** so they stay in the same
+- [x] **Step 3: Rewrite the five seed prompts** so they stay in the same
   semantic neighborhood without restating the eval task. Same topic, different
   instance:
   - `What is the capital of France?` → `What is the capital of Portugal?`
@@ -107,15 +107,25 @@ introduced at seed time, not at write-back time.
     `Plan a 3-step strategy for splitting a shared database between two teams,
     considering write contention.`
   Update each row's canned response text to match its new prompt.
-- [ ] **Step 4: Run the test — green.** Then `.venv/bin/pytest -q` for the full
+- [x] **Step 4: Run the test — green.** Then `.venv/bin/pytest -q` for the full
   suite.
-- [ ] **Step 5: Record the finding** in `docs/specs/2026-09-04-wide-ladder-design.md`
+- [x] **Step 5: Record the finding** in `docs/specs/2026-09-04-wide-ladder-design.md`
   §8.1 as a correction: the first wide-ladder gate ran against a bank that
   leaked 5 of 8 eval prompts, so its effectiveness delta is not a clean
   measurement of routing. State it plainly — it is evidence about the gate, not
   a reason to hide the gate.
 
 ---
+
+**Completed 2026-09-30.** Baseline: 100 tests passed. The normalized
+0.85 guard found six seed collisions rather than the expected five: the Japan
+capital question also matched at 0.881. All six prompts were rewritten, with
+matching canned answers; the Portugal and loop examples needed more rewording
+than the suggested substitutions to clear the threshold. All interactive
+label candidates passed. The reusable guard lives in `gatoway/bank_corpus.py`
+and accepts strings or records exposing `prompt`. Regression coverage: 47
+tests; full suite: 147 passed (the same two dependency deprecation warnings).
+Existing database rows are unchanged; Task 4 rebuilds the isolated bank.
 
 ### Task 2: Build the train-split prompt corpus
 
@@ -125,7 +135,7 @@ introduced at seed time, not at write-back time.
 
 **Interfaces:**
 - Consumes: `gatoway.eval.BENCHMARK_TASKS` (for the overlap guard only),
-  `gatoway.eval.score_task`-compatible scoring methods.
+  `gatoway.bank_corpus.score`-compatible scoring methods.
 - Produces: `TRAIN_PROMPTS: list[TrainPrompt]` with fields `prompt_id`,
   `prompt`, `scoring_method`, `expected`, `neighborhood`. Consumed by Task 3.
 
@@ -146,22 +156,44 @@ eval suite so the density lands where the gate measures:
 
 20 prompts × 8 rungs = 160 rows, 160 model calls per bootstrap run.
 
-- [ ] **Step 1: Write the failing test.** Assert: every `prompt_id` is unique;
+- [x] **Step 1: Write the failing test.** Assert: every `prompt_id` is unique;
   every `scoring_method` is one `score_task` handles; every neighborhood has at
   least 2 prompts (so `MIN_OBSERVATIONS = 2` is satisfiable within it); and
   `assert_no_eval_overlap(TRAIN_PROMPTS)` passes.
-- [ ] **Step 2: Verify it fails** (module does not exist yet).
-- [ ] **Step 3: Write `gatoway/bank_corpus.py`.** The `python_execution` and
+- [x] **Step 2: Verify it fails** (the guard module exists after Task 1, but
+  importing `TRAIN_PROMPTS` fails until the corpus is implemented).
+- [x] **Step 3: Write `gatoway/bank_corpus.py`.** The `python_execution` and
   `sql_execution` prompts must be answerable within the scorers' constrained
   languages — a single `for` loop over `arr`/`n` for Python, a read-only
   `SELECT` for SQL. Reuse the existing scorers; do not write new ones. Add
   fixtures for any new SQL/Python shape, or reword the prompt to fit the
   existing fixtures — prefer rewording.
-- [ ] **Step 4: Green, then full suite.**
+- [x] **Step 4: Green, then full suite.**
 
 ---
 
+**Completed 2026-09-30.** Added 20 train prompts across all eight
+neighborhoods, with reference answers and an explicit train split. The six
+execution tasks use different outputs from the eval tasks; trusted fixtures
+extend the existing constrained scorers without changing their default eval
+fixtures. Tests reject eval answers on train fixtures and train references on
+eval fixtures in both directions. All prompts pass the overlap guard.
+Validation: 182 tests passed, up from 147, with the same two dependency
+deprecation warnings. No provider calls or database writes were made.
+
+**Coding expansion completed:** Tasks A–D in
+`docs/plans/2026-09-24-coding-tasks.md`, then bootstrap Task 3 below.
+All open-ended train tasks now use the calibrated rubric judge for live scoring.
+
 ### Task 3: Bootstrap harness
+
+**Updated after coding expansion:** consume the 36-record corpus and await
+bank_corpus.score(task, response.content, response.model_id). Docker must
+be running with the Python and Node images available. Preserve fractional
+code scores and propagate judge/container infrastructure errors; they must
+never produce zero-score bank rows. Use the actual response model for judging.
+For dry runs pass dry_run=True and write no bank rows.
+
 
 **Files:**
 - Create: `gatoway/bootstrap_bank.py`
@@ -169,7 +201,7 @@ eval suite so the density lands where the gate measures:
 
 **Interfaces:**
 - Consumes: `bank_corpus.TRAIN_PROMPTS`, `providers.MODEL_LADDER`,
-  `providers.call_provider`, `eval.score_task`, `embeddings.embed`,
+  `providers.call_provider`, `bank_corpus.score`, `embeddings.embed`,
   `db.get_pool`.
 - Produces: `decision_history` rows with `model_id` = the rung's primary,
   `calculated_effectiveness` = the measured score, `calculated_difficulty` =
@@ -177,24 +209,36 @@ eval suite so the density lands where the gate measures:
   observed outcome, not a similarity match — matching `batch_job.py`'s
   convention), `session_id = NULL`.
 
-- [ ] **Step 1: Write the failing test** against a fake pool and a fake
+- [x] **Step 1: Write the failing test** against a fake pool and a fake
   provider. Cover: every (prompt, rung) pair produces exactly one row; a scored
   0.0 response is still written (**failures are evidence** — this is the row
   that lets the bar reject a rung); a provider exception skips that pair without
   aborting the run; `--dry-run` writes nothing and makes no provider call.
-- [ ] **Step 2: Verify it fails.**
-- [ ] **Step 3: Implement.** Structure mirrors `eval.py`'s provider path:
-  temperature 0, `max_tokens` 512, 60s timeout, one retry. Print progress per
+- [x] **Step 2: Verify it fails.**
+- [x] **Step 3: Implement.** Structure mirrors `eval.py`'s provider path:
+  temperature 0, 512 tokens for original tasks / 2048 for coding, 120s timeout, one retry. Print progress per
   prompt. Two flags: `--dry-run` (canned responses, no DB) and `--rung NAME`
   (single rung, for iterating on the harness).
-- [ ] **Step 4: Compute difficulty from the cross-product, not by hand.** Once
+- [x] **Step 4: Compute difficulty from the cross-product, not by hand.** Once
   all 8 rungs have answered a prompt, `difficulty = 1 − mean(scores)` — a prompt
   every rung solves is easy, one only `kimi` solves is hard. This is the first
   difficulty figure in the project that is measured rather than guessed. Note
   it in the module docstring.
-- [ ] **Step 5: Green, then full suite.**
+- [x] **Step 5: Green, then full suite.**
 
 ---
+
+**Implemented and validated.** Baseline was 323 tests. The full suite
+passed 336 tests after implementation; an additional opt-in local Postgres
+integration test passed with fake providers. A complete dry run scored 288
+pairs with no provider calls, embeddings, or writes.
+
+The CLI requires a separately named, ownership-marked evaluation database.
+Checkpointed outcomes are tied to task/scorer fingerprints; stable row IDs
+make resuming idempotent. Each prompt commits atomically. Zero-score answers
+are stored; failed provider pairs are omitted. Difficulty remains NULL for
+incomplete or single-rung measurements, then updates once all eight models
+are observed. Scorer infrastructure failures propagate.
 
 ### Task 4: Run it and re-gate
 
@@ -203,23 +247,23 @@ eval suite so the density lands where the gate measures:
 - Regenerated: `docs/eval_report.md`
 - Modify: `README.md` (headline numbers, currently stale from the pre-fix gate)
 
-- [ ] **Step 1: Rebuild the bank from scratch** in the isolated eval database:
+- [x] **Step 1: Rebuild the bank from scratch** in the isolated eval database:
   `db migrate`, then `bootstrap_bank`. Decide and record whether the 24
   hand-labeled seed rows are kept. **Recommendation: drop them.** Their
   effectiveness values are assumptions in the 0.85–0.98 band, so every one
   clears the 0.7 bar by construction and they dilute measured evidence with
   guesses. A measured-only bank is also a much stronger claim.
-- [ ] **Step 2: Sanity-check density before spending a gate run.** For each eval
+- [x] **Step 2: Sanity-check density before spending a gate run.** For each eval
   task prompt, query the bank the way `classify()` does and record how many
   rungs clear `CONFIDENCE_FLOOR` with ≥ `MIN_OBSERVATIONS` rows. If most tasks
   still see fewer than 2 rungs with evidence, the corpus needs more prompts per
   neighborhood — fix that before running the gate, not after.
-- [ ] **Step 3: Run the 3-run eval gate** (`python -m gatoway.eval`), live, DB-backed.
-- [ ] **Step 4: Record the result honestly**, pass or fail, in design §8.1. If
+- [x] **Step 3: Run the 3-run eval gate**, live, DB-backed. Completed October 4
+  with the expanded 32-task suite and rubric-json-v2 against the frozen bank.
+- [x] **Step 4: Record the result honestly**, pass or fail, in design §8.1. If
   the ladder still cannot beat the three-tier result, that is a finding about
   the ladder, not a reason to keep tuning the bank.
-- [ ] **Step 5: Update `README.md`** to match the regenerated report. It
-  currently quotes the first wide-ladder gate, two runs out of date.
+- [x] **Step 5: Update `README.md`** to match the completed expanded report.
 - [ ] **Step 6: Consider pruning dead rungs.** §3.3 of the design promised rungs
   would be removed on evidence. With a dense measured bank, a rung the router
   never selects is finally meaningful evidence rather than an artifact of
@@ -240,3 +284,54 @@ eval suite so the density lands where the gate measures:
 - **Should `bootstrap_bank` replace `seed.py` entirely?** Probably, once it
   works. `label_seed.py` keeps its value for growing coverage into
   neighborhoods with no automated scorer.
+
+## Live execution — 2026-09-30
+
+Explicit user authorization covered train/eval prompts, generated answers and
+rubrics sent to NRP. The measured-only database
+`gatoway_eval_measured_20260930` contains **288 observations**: 36 prompts ×
+eight primary models. No historical seed rows were copied. The original
+`gatoway` database retains its 106 rows unchanged.
+
+All saved outcomes, row IDs, difficulties, confidence values and fingerprints
+passed integrity checks. Every eval task has at least two qualifying neighbors
+on all eight rungs under the production query. See
+[bank density](../bank_density.md) and [bootstrap report](../bootstrap_report.md).
+
+**Historical partial attempt:** the live gate was resumed sequentially on 2026-10-03 against this
+frozen bank. One repetition completed; repetition two is blocked on GLM-5
+returning truncated, invalid rubric JSON for the saved baseline
+authentication-design answer, including after a separate resume attempt.
+The sequential attempt has not reached repetition three. The first repetition
+shows 93.7% lower cost proxy and a 0.47-point quality decrease; it does not
+establish accuracy preservation or stability. See [the partial live report](../eval_report.md).
+Reliable structured rubric output is now the immediate prerequisite; any
+scorer change needs validation and checkpoint/bank compatibility review.
+Each repetition has independent sessions. Completed runs
+are checkpointed in artifacts/gatoway_eval_measured_20260930/eval_runs.json.
+The runner is saved beside that checkpoint. Standard sequential reproduction:
+
+~~~bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m gatoway.bootstrap_bank \
+  --database gatoway_eval_measured_20260930 --concurrency 4
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m gatoway.bank_density \
+  --database gatoway_eval_measured_20260930
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m gatoway.eval \
+  --database gatoway_eval_measured_20260930 --require-db --runs 3 \
+  --checkpoint artifacts/measured_eval_sequential.json
+~~~
+
+**Completed follow-up, 2026-10-04:** all three repetitions of the 32-task
+expanded suite completed with rubric-json-v2 and fresh responses, retaining
+the frozen bank's historical training scores. The result is 92.2% lower cost
+proxy but a 3.33-point quality loss (89.32% versus 92.66%) and failed stability.
+See [the completed live report](../eval_report_expanded.md). All bank row values
+were unchanged. Checkpoints are under `artifacts/expanded_eval_v2_20261003/`.
+The scorer/task changes mean the historical checkpoints above must not be
+resumed as current scores; this was a separately versioned evaluation.
+
+The sequential CLI uses a separate checkpoint format/path. For the historical
+16-task suite, expected calls before retries were 288 train generations +
+64 train rubric judgments, then 96 eval generations + 24 eval rubric judgments.
+The completed 32-task suite used 192 answer responses and 24 rubric judgments,
+plus retries; it did not regenerate or regrade the training bank.

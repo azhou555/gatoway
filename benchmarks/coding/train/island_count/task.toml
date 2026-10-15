@@ -1,0 +1,3 @@
+language = "python"
+neighborhood = "graph BFS"
+entrypoint = "island_count"

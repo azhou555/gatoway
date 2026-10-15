@@ -401,20 +401,12 @@ class DockerGrader:
         self.image_id = result.stdout.strip()
 
     def __call__(self, workspace: Path) -> GradeResult:
-        command = [
-            "docker", "run", "--rm", "--pull", "never",
-            "--network", "none", "--read-only", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges", "--pids-limit", "128",
-            "--memory", "256m", "--cpus", "1",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-            "--user", "65534:65534",
-            "-e", "PYTHONDONTWRITEBYTECODE=1",
-            "-e", "PYTHONPATH=/workspace",
-            "-v", f"{workspace.resolve()}:/workspace:ro",
-            "-w", "/workspace",
-            self.image_id or self.image,
-            "python", "-m", "unittest", "discover", "-s", "grader_tests", "-v",
-        ]
+        from gatoway.sandbox import docker_command
+
+        command = docker_command(
+            workspace, self.image_id or self.image,
+            ["python", "-m", "unittest", "discover", "-s", "grader_tests", "-v"],
+        )
         try:
             result = subprocess.run(
                 command,

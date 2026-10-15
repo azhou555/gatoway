@@ -1,0 +1,4 @@
+language = "python"
+neighborhood = "graph BFS"
+entrypoint = "shortest_path"
+difficulty = 0.6

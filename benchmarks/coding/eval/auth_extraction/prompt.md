@@ -1,0 +1,1 @@
+An established monolith must move authentication into a separate service without logging out all users. Propose a phased architecture, session migration, authorization boundary, rollback, and failure behavior.
